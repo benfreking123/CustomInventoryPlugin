@@ -7,7 +7,7 @@ Dependacies:
 
 settings.yml allows for setting custom slots as new equiptable slots
 Items allowed in each slot must have the lore formatting of 
-'<form>: <type>', ex: 'Type: Ring' which is specificed in the settings.yml
+'{form}: {type}', ex: 'Type: Ring' which is specificed in the settings.yml
 
 
 ```
