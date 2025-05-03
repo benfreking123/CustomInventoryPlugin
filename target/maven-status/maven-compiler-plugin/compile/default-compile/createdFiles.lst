@@ -1,6 +1,5 @@
 com\example\custominventoryplugin\config\ConfigManager.class
 com\example\custominventoryplugin\data\PlayerGearData.class
-com\example\custominventoryplugin\commands\AttributeCommand.class
 com\example\custominventoryplugin\commands\GearCommand.class
 com\example\custominventoryplugin\inventory\GearInventory.class
 com\example\custominventoryplugin\CustomInventoryPlugin.class

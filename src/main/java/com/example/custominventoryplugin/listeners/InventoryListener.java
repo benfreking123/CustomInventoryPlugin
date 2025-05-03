@@ -51,101 +51,162 @@ public class InventoryListener implements Listener {
                 return;
             }
 
-            // Find the first valid custom slot for this item
+            // Cancel vanilla shift-click behavior
+            event.setCancelled(true);
+
+            // Try to place in correct armor slot
+            for (Map.Entry<String, Integer> entry : configManager.getArmorSlots().entrySet()) {
+                String armorType = entry.getKey();
+                int guiSlot = entry.getValue();
+                if (isValidArmorForSlot(clickedItem, armorType)) {
+                    ItemStack slotItem = event.getInventory().getItem(guiSlot);
+                    if (slotItem == null || slotItem.getType().isAir()) {
+                        // Place item in GUI
+                        event.getInventory().setItem(guiSlot, clickedItem.clone());
+                        
+                        // Update player's actual armor
+                        PlayerInventory playerInv = player.getInventory();
+                        switch (armorType) {
+                            case "helmet" -> playerInv.setHelmet(clickedItem.clone());
+                            case "chestplate" -> playerInv.setChestplate(clickedItem.clone());
+                            case "leggings" -> playerInv.setLeggings(clickedItem.clone());
+                            case "boots" -> playerInv.setBoots(clickedItem.clone());
+                        }
+                        
+                        // Update player data
+                        PlayerGearData.setPlayerGear(player.getUniqueId(), armorType, clickedItem.clone());
+                        
+                        // Remove from player's inventory
+                        clickedItem.setAmount(clickedItem.getAmount() - 1);
+                        if (clickedItem.getAmount() <= 0) {
+                            event.setCurrentItem(null);
+                        }
+                        
+                        // Update inventory display
+                        if (event.getInventory().getHolder() instanceof GearInventory gearInventory) {
+                            gearInventory.updateInventory();
+                        }
+                        return;
+                    }
+                }
+            }
+
+            // Try to place in correct custom slot
+            for (Map.Entry<String, ConfigManager.CustomSlot> entry : configManager.getCustomSlots().entrySet()) {
+                String slotId = entry.getKey();
+                ConfigManager.CustomSlot customSlot = entry.getValue();
+                int guiSlot = customSlot.getPosition();
+                if (customSlot.isEnabled() && isValidItemForSlot(clickedItem, customSlot)) {
+                    ItemStack slotItem = event.getInventory().getItem(guiSlot);
+                    if (slotItem == null || slotItem.getType().isAir()) {
+                        // Place item in GUI
+                        event.getInventory().setItem(guiSlot, clickedItem.clone());
+                        
+                        // Update player data
+                        configManager.debug("Shift-clicking item into custom slot " + slotId + ": " + clickedItem.getType());
+                        PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, clickedItem.clone());
+                        
+                        // Remove from player's inventory
+                        clickedItem.setAmount(clickedItem.getAmount() - 1);
+                        if (clickedItem.getAmount() <= 0) {
+                            event.setCurrentItem(null);
+                        }
+                        
+                        // Update inventory display
+                        if (event.getInventory().getHolder() instanceof GearInventory gearInventory) {
+                            gearInventory.updateInventory();
+                        }
+                        return;
+                    }
+                }
+            }
+
+            // If no valid slot found, do nothing (item stays in player inventory)
+            return;
+        }
+
+        // Handle normal clicks and drags
+        if (event.getClickedInventory() == event.getView().getTopInventory()) {
+            // Check if the slot is a custom slot
             Map<String, ConfigManager.CustomSlot> customSlots = configManager.getCustomSlots();
             for (Map.Entry<String, ConfigManager.CustomSlot> entry : customSlots.entrySet()) {
                 String slotId = entry.getKey();
                 ConfigManager.CustomSlot customSlot = entry.getValue();
-                
-                if (customSlot.isEnabled() && isValidItemForSlot(clickedItem, customSlot)) {
-                    // Store the item in PlayerGearData
-                    configManager.debug("Shift-clicking item into custom slot " + slotId + ": " + clickedItem.getType());
-                    PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, clickedItem.clone());
-                    return;
-                }
-            }
-            return;
-        }
-
-        // Check if the slot is a custom slot
-        Map<String, ConfigManager.CustomSlot> customSlots = configManager.getCustomSlots();
-        for (Map.Entry<String, ConfigManager.CustomSlot> entry : customSlots.entrySet()) {
-            String slotId = entry.getKey();
-            ConfigManager.CustomSlot customSlot = entry.getValue();
-            if (customSlot.getPosition() == slot) {
-                if (!customSlot.isEnabled()) {
-                    event.setCancelled(true);
-                    return;
-                }
-                
-                // Handle item placement
-                if (event.getCursor() != null && !event.getCursor().getType().isAir()) {
-                    if (!isValidItemForSlot(event.getCursor(), customSlot)) {
+                if (customSlot.getPosition() == event.getRawSlot()) {
+                    if (!customSlot.isEnabled()) {
                         event.setCancelled(true);
                         return;
                     }
                     
-                    // Store the item in PlayerGearData
-                    configManager.debug("Placing item in custom slot " + slotId + ": " + event.getCursor().getType());
-                    PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, event.getCursor().clone());
-                }
-                
-                // Handle item removal
-                if (event.getCurrentItem() != null) {
-                    if (event.isShiftClick() || event.getCursor() == null || event.getCursor().getType().isAir()) {
-                        // Remove the item from PlayerGearData when:
-                        // 1. Shift-clicking
-                        // 2. Clicking with empty cursor (picking up)
-                        configManager.debug("Removing item from custom slot " + slotId + " (shift/empty)");
-                        PlayerGearData.removePlayerGear(player.getUniqueId(), slotId);
-                        // Remove attributes for this slot
-                        removeSlotAttributes(player, slotId);
-                    } else if (event.getCursor() != null && !event.getCursor().getType().isAir()) {
-                        // If swapping items, remove the old one and store the new one
-                        configManager.debug("Swapping items in custom slot " + slotId);
-                        configManager.debug("Removing old item: " + event.getCurrentItem().getType());
-                        configManager.debug("Storing new item: " + event.getCursor().getType());
-                        // Remove attributes for the old item
-                        removeSlotAttributes(player, slotId);
+                    // Handle item placement
+                    if (event.getCursor() != null && !event.getCursor().getType().isAir()) {
+                        if (!isValidItemForSlot(event.getCursor(), customSlot)) {
+                            event.setCancelled(true);
+                            return;
+                        }
+                        
+                        // Store the item in PlayerGearData
+                        configManager.debug("Placing item in custom slot " + slotId + ": " + event.getCursor().getType());
                         PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, event.getCursor().clone());
                     }
-                }
-                return;
-            }
-        }
-        
-        // Handle armor slots
-        Map<String, Integer> armorSlots = configManager.getArmorSlots();
-        for (Map.Entry<String, Integer> entry : armorSlots.entrySet()) {
-            if (entry.getValue() == slot) {
-                // Validate armor type
-                ItemStack item = event.getCursor();
-                if (item != null && !item.getType().isAir()) {
-                    if (!isValidArmorForSlot(item, entry.getKey())) {
-                        event.setCancelled(true);
-                        return;
+                    
+                    // Handle item removal
+                    if (event.getCurrentItem() != null) {
+                        if (event.isShiftClick() || event.getCursor() == null || event.getCursor().getType().isAir()) {
+                            // Remove the item from PlayerGearData when:
+                            // 1. Shift-clicking
+                            // 2. Clicking with empty cursor (picking up)
+                            configManager.debug("Removing item from custom slot " + slotId + " (shift/empty)");
+                            PlayerGearData.removePlayerGear(player.getUniqueId(), slotId);
+                            // Remove attributes for this slot
+                            removeSlotAttributes(player, slotId);
+                        } else if (event.getCursor() != null && !event.getCursor().getType().isAir()) {
+                            // If swapping items, remove the old one and store the new one
+                            configManager.debug("Swapping items in custom slot " + slotId);
+                            configManager.debug("Removing old item: " + event.getCurrentItem().getType());
+                            configManager.debug("Storing new item: " + event.getCursor().getType());
+                            // Remove attributes for the old item
+                            removeSlotAttributes(player, slotId);
+                            PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, event.getCursor().clone());
+                        }
                     }
+                    return;
                 }
-                
-                // Sync with player's armor
-                PlayerInventory playerInv = player.getInventory();
-                switch (entry.getKey()) {
-                    case "helmet" -> playerInv.setHelmet(event.getCursor());
-                    case "chestplate" -> playerInv.setChestplate(event.getCursor());
-                    case "leggings" -> playerInv.setLeggings(event.getCursor());
-                    case "boots" -> playerInv.setBoots(event.getCursor());
+            }
+            
+            // Handle armor slots
+            Map<String, Integer> armorSlots = configManager.getArmorSlots();
+            for (Map.Entry<String, Integer> entry : armorSlots.entrySet()) {
+                if (entry.getValue() == event.getRawSlot()) {
+                    // Validate armor type
+                    ItemStack item = event.getCursor();
+                    if (item != null && !item.getType().isAir()) {
+                        if (!isValidArmorForSlot(item, entry.getKey())) {
+                            event.setCancelled(true);
+                            return;
+                        }
+                    }
+                    
+                    // Sync with player's armor
+                    PlayerInventory playerInv = player.getInventory();
+                    switch (entry.getKey()) {
+                        case "helmet" -> playerInv.setHelmet(event.getCursor());
+                        case "chestplate" -> playerInv.setChestplate(event.getCursor());
+                        case "leggings" -> playerInv.setLeggings(event.getCursor());
+                        case "boots" -> playerInv.setBoots(event.getCursor());
+                    }
+                    return;
                 }
+            }
+            
+            // Cancel if clicking on barrier or glass panes
+            ItemStack clickedItem = event.getCurrentItem();
+            if (clickedItem != null && 
+                (clickedItem.getType() == Material.BARRIER || 
+                 clickedItem.getType() == Material.GRAY_STAINED_GLASS_PANE)) {
+                event.setCancelled(true);
                 return;
             }
-        }
-        
-        // Cancel if clicking on barrier or glass panes
-        ItemStack clickedItem = event.getCurrentItem();
-        if (clickedItem != null && 
-            (clickedItem.getType() == Material.BARRIER || 
-             clickedItem.getType() == Material.GRAY_STAINED_GLASS_PANE)) {
-            event.setCancelled(true);
-            return;
         }
     }
 
@@ -263,12 +324,19 @@ public class InventoryListener implements Listener {
     }
 
     private boolean isValidArmorForSlot(ItemStack item, String slotType) {
+        if (item == null || item.getType().isAir()) {
+            return false;
+        }
+
         Material type = item.getType();
         switch (slotType.toLowerCase()) {
             case "helmet":
-                return type.name().endsWith("_HELMET") || type == Material.CARVED_PUMPKIN || type == Material.TURTLE_HELMET;
+                return type.name().endsWith("_HELMET") || 
+                       type == Material.CARVED_PUMPKIN || 
+                       type == Material.TURTLE_HELMET;
             case "chestplate":
-                return type.name().endsWith("_CHESTPLATE") || type == Material.ELYTRA;
+                return type.name().endsWith("_CHESTPLATE") || 
+                       type == Material.ELYTRA;
             case "leggings":
                 return type.name().endsWith("_LEGGINGS");
             case "boots":
