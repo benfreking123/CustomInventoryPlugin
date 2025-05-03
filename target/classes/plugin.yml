@@ -1,0 +1,28 @@
+name: CustomInventoryPlugin
+version: '1.0-SNAPSHOT'
+main: com.example.custominventoryplugin.CustomInventoryPlugin
+api-version: '1.21'
+description: A custom inventory plugin for Paper 1.21.4
+authors: [YourName]
+depend: [Fabled]
+commands:
+  addstrength:
+    description: Adds 5 to your Strength attribute
+    usage: /<command>
+    permission: custominventory.addstrength
+  gear:
+    description: Opens the gear inventory
+    usage: /<command>
+    permission: custominventory.use
+  debug:
+    description: Debug commands for CustomInventory
+    usage: /<command> [toggle|reload|form|type]
+    permission: custominventory.debug
+
+permissions:
+  custominventory.use:
+    description: Allows use of the gear command
+    default: true
+  custominventory.debug:
+    description: Allows use of debug commands
+    default: op 
