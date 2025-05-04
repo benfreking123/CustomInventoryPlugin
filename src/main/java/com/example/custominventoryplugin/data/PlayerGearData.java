@@ -11,10 +11,13 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.logging.Level;
+import java.util.Set;
+import java.util.HashSet;
 
 public class PlayerGearData {
     private static final Map<UUID, Map<String, ItemStack>> playerGear = new HashMap<>();
     public static final Map<UUID, Map<String, Map<String, Integer>>> playerSlotAttributes = new HashMap<>();
+    private static final Map<UUID, Set<String>> playerPermissions = new HashMap<>();
     private static Plugin plugin;
 
     public static void initialize(Plugin plugin) {
@@ -155,5 +158,27 @@ public class PlayerGearData {
 
     public static void clearPlayerSlotAttributes(UUID playerUUID) {
         playerSlotAttributes.remove(playerUUID);
+    }
+
+    public static void addPlayerPermission(UUID playerUUID, String permission) {
+        playerPermissions.computeIfAbsent(playerUUID, k -> new HashSet<>()).add(permission);
+    }
+
+    public static void removePlayerPermission(UUID playerUUID, String permission) {
+        Set<String> permissions = playerPermissions.get(playerUUID);
+        if (permissions != null) {
+            permissions.remove(permission);
+            if (permissions.isEmpty()) {
+                playerPermissions.remove(playerUUID);
+            }
+        }
+    }
+
+    public static Set<String> getPlayerPermissions(UUID playerUUID) {
+        return playerPermissions.getOrDefault(playerUUID, new HashSet<>());
+    }
+
+    public static void clearPlayerPermissions(UUID playerUUID) {
+        playerPermissions.remove(playerUUID);
     }
 } 

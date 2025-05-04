@@ -1,5 +1,6 @@
 package com.example.custominventoryplugin.commands;
 
+import com.example.custominventoryplugin.CustomInventoryPlugin;
 import com.example.custominventoryplugin.config.ConfigManager;
 import com.example.custominventoryplugin.inventory.GearInventory;
 import org.bukkit.command.Command;
@@ -10,9 +11,11 @@ import org.jetbrains.annotations.NotNull;
 
 public class GearCommand implements CommandExecutor {
     private final ConfigManager configManager;
+    private final CustomInventoryPlugin plugin;
     
-    public GearCommand(ConfigManager configManager) {
+    public GearCommand(ConfigManager configManager, CustomInventoryPlugin plugin) {
         this.configManager = configManager;
+        this.plugin = plugin;
     }
     
     @Override
@@ -23,7 +26,7 @@ public class GearCommand implements CommandExecutor {
         }
 
         Player player = (Player) sender;
-        GearInventory gearInventory = new GearInventory(player, configManager);
+        GearInventory gearInventory = new GearInventory(player, configManager, plugin);
         player.openInventory(gearInventory.getInventory());
         
         return true;

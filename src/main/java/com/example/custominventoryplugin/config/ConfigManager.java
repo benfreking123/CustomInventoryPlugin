@@ -81,7 +81,8 @@ public class ConfigManager {
                         config.getString(path + ".form", "ring"),
                         config.getString(path + ".type", "accessory"),
                         position,
-                        key
+                        config.getString(path + ".slot-type", "skill"),
+                        config.getString(path + ".lore_match", "")
                     );
                     customSlots.put(key, slot);
                 }
@@ -174,6 +175,8 @@ public class ConfigManager {
                 config.set(path + ".form", slot.getForm());
                 config.set(path + ".type", slot.getType());
                 config.set(path + ".position", slot.getPosition());
+                config.set(path + ".slot-type", slot.getSlotType());
+                config.set(path + ".lore_match", slot.getLoreMatch());
             }
             
             // Save other settings
@@ -192,14 +195,16 @@ public class ConfigManager {
         private final String form;
         private final String type;
         private final int position;
-        private final String id;
+        private final String slotType; // "skill" or "attribute"
+        private final String loreMatch; // Custom lore matching pattern
 
-        public CustomSlot(boolean enabled, String form, String type, int position, String id) {
+        public CustomSlot(boolean enabled, String form, String type, int position, String slotType, String loreMatch) {
             this.enabled = enabled;
             this.form = form;
             this.type = type;
             this.position = position;
-            this.id = id;
+            this.slotType = slotType;
+            this.loreMatch = loreMatch;
         }
 
         public boolean isEnabled() {
@@ -218,8 +223,12 @@ public class ConfigManager {
             return position;
         }
 
-        public String getId() {
-            return id;
+        public String getSlotType() {
+            return slotType;
+        }
+
+        public String getLoreMatch() {
+            return loreMatch;
         }
     }
 } 

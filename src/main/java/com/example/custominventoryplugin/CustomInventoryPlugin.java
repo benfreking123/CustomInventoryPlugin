@@ -26,11 +26,11 @@ public class CustomInventoryPlugin extends JavaPlugin {
         }
 
         // Register commands
-        getCommand("gear").setExecutor(new GearCommand(configManager));
+        getCommand("gear").setExecutor(new GearCommand(configManager, this));
         getCommand("debug").setExecutor(new DebugCommand(configManager));
         
         // Register listeners
-        getServer().getPluginManager().registerEvents(new InventoryListener(configManager), this);
+        getServer().getPluginManager().registerEvents(new InventoryListener(configManager, this), this);
         
         getLogger().info("CustomInventoryPlugin has been enabled!");
     }

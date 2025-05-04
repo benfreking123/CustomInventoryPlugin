@@ -1,5 +1,6 @@
 package com.example.custominventoryplugin.listeners;
 
+import com.example.custominventoryplugin.CustomInventoryPlugin;
 import com.example.custominventoryplugin.config.ConfigManager;
 import com.example.custominventoryplugin.data.PlayerGearData;
 import com.example.custominventoryplugin.inventory.GearInventory;
@@ -15,6 +16,7 @@ import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.permissions.PermissionAttachment;
 import studio.magemonkey.fabled.api.player.PlayerData;
 import studio.magemonkey.fabled.Fabled;
 
@@ -22,12 +24,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.HashMap;
+import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.ArrayList;
 
 public class InventoryListener implements Listener {
     private final ConfigManager configManager;
+    private final CustomInventoryPlugin plugin;
+    private final Map<UUID, PermissionAttachment> permissionAttachments;
     
-    public InventoryListener(ConfigManager configManager) {
+    public InventoryListener(ConfigManager configManager, CustomInventoryPlugin plugin) {
         this.configManager = configManager;
+        this.plugin = plugin;
+        this.permissionAttachments = new HashMap<>();
     }
 
     @EventHandler
@@ -106,6 +115,11 @@ public class InventoryListener implements Listener {
                         configManager.debug("Shift-clicking item into custom slot " + slotId + ": " + clickedItem.getType());
                         PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, clickedItem.clone());
                         
+                        // If this is a skill slot, handle permissions
+                        if ("skill".equalsIgnoreCase(customSlot.getSlotType())) {
+                            handleSkillSlotPermissions(player, clickedItem, slotId);
+                        }
+                        
                         // Remove from player's inventory
                         clickedItem.setAmount(clickedItem.getAmount() - 1);
                         if (clickedItem.getAmount() <= 0) {
@@ -148,6 +162,11 @@ public class InventoryListener implements Listener {
                         // Store the item in PlayerGearData
                         configManager.debug("Placing item in custom slot " + slotId + ": " + event.getCursor().getType());
                         PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, event.getCursor().clone());
+                        
+                        // If this is a skill slot, handle permissions
+                        if ("skill".equalsIgnoreCase(customSlot.getSlotType())) {
+                            handleSkillSlotPermissions(player, event.getCursor(), slotId);
+                        }
                     }
                     
                     // Handle item removal
@@ -158,16 +177,33 @@ public class InventoryListener implements Listener {
                             // 2. Clicking with empty cursor (picking up)
                             configManager.debug("Removing item from custom slot " + slotId + " (shift/empty)");
                             PlayerGearData.removePlayerGear(player.getUniqueId(), slotId);
-                            // Remove attributes for this slot
-                            removeSlotAttributes(player, slotId);
+                            
+                            // Remove attributes or permissions based on slot type
+                            if ("skill".equalsIgnoreCase(customSlot.getSlotType())) {
+                                removeSkillSlotPermissions(player, slotId);
+                            } else if ("attribute".equalsIgnoreCase(customSlot.getSlotType())) {
+                                removeSlotAttributes(player, slotId);
+                            }
                         } else if (event.getCursor() != null && !event.getCursor().getType().isAir()) {
                             // If swapping items, remove the old one and store the new one
                             configManager.debug("Swapping items in custom slot " + slotId);
                             configManager.debug("Removing old item: " + event.getCurrentItem().getType());
                             configManager.debug("Storing new item: " + event.getCursor().getType());
-                            // Remove attributes for the old item
-                            removeSlotAttributes(player, slotId);
+                            
+                            // Remove old permissions/attributes
+                            if ("skill".equalsIgnoreCase(customSlot.getSlotType())) {
+                                removeSkillSlotPermissions(player, slotId);
+                            } else if ("attribute".equalsIgnoreCase(customSlot.getSlotType())) {
+                                removeSlotAttributes(player, slotId);
+                            }
+                            
+                            // Store new item
                             PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, event.getCursor().clone());
+                            
+                            // Handle new permissions if it's a skill slot
+                            if ("skill".equalsIgnoreCase(customSlot.getSlotType())) {
+                                handleSkillSlotPermissions(player, event.getCursor(), slotId);
+                            }
                         }
                     }
                     return;
@@ -289,38 +325,180 @@ public class InventoryListener implements Listener {
         // Remove existing gear attributes
         removeGearAttributes(player);
         
-        // Apply new gear attributes
+        // Remove existing permissions
+        PermissionAttachment attachment = permissionAttachments.remove(playerUUID);
+        if (attachment != null) {
+            attachment.remove();
+        }
+        PlayerGearData.clearPlayerPermissions(playerUUID);
+        
+        // Apply new gear attributes and handle skills
         Map<String, ConfigManager.CustomSlot> customSlots = configManager.getCustomSlots();
         for (Map.Entry<String, ConfigManager.CustomSlot> entry : customSlots.entrySet()) {
             String slotId = entry.getKey();
+            ConfigManager.CustomSlot slot = entry.getValue();
+            if (!slot.isEnabled()) continue;
+
             ItemStack gear = PlayerGearData.getPlayerGear(playerUUID, slotId);
             if (gear != null && !gear.getType().isAir()) {
-                applyGearAttributes(player, gear, entry.getValue());
+                if ("skill".equalsIgnoreCase(slot.getSlotType())) {
+                    // Handle skill slot
+                    if (gear.getItemMeta() != null) {
+                        String displayName = gear.getItemMeta().getDisplayName();
+                        if (displayName != null && displayName.endsWith(" Gem")) {
+                            String skillName = displayName.substring(0, displayName.length() - 4).trim()
+                                .toLowerCase().replace(' ', '-');
+                            String permission = "fabled.skill." + skillName;
+                            
+                            // Add permission and track it
+                            PermissionAttachment newAttachment = player.addAttachment(plugin);
+                            newAttachment.setPermission(permission, true);
+                            permissionAttachments.put(playerUUID, newAttachment);
+                            PlayerGearData.addPlayerPermission(playerUUID, permission);
+                            configManager.debug("Granted permission: " + permission + " to " + player.getName());
+                        }
+                    }
+                } else if ("attribute".equalsIgnoreCase(slot.getSlotType())) {
+                    // Handle attribute slot (existing logic)
+                    applyGearAttributes(player, gear, slot);
+                }
+            } else {
+                // If slot is empty, remove any associated permissions for skill slots
+                if ("skill".equalsIgnoreCase(slot.getSlotType())) {
+                    configManager.debug("No skill item in slot " + slotId + " for " + player.getName() + ", no permission granted.");
+                }
             }
         }
     }
 
     private boolean isValidItemForSlot(ItemStack item, ConfigManager.CustomSlot slot) {
-        if (item == null || item.getType().isAir()) {
-            return false;
-        }
-
+        if (item == null || item.getType().isAir()) return false;
         ItemMeta meta = item.getItemMeta();
-        if (meta == null) {
-            return false;
+        if (meta == null) return false;
+        List<String> lore = meta.getLore();
+        if (lore == null) return false;
+
+        String loreMatch = slot.getLoreMatch();
+        if (loreMatch == null || loreMatch.isEmpty()) {
+            // If no lore match is specified, use the old form/type matching
+            String form = extractLoreValue(lore, slot.getForm());
+            String type = extractLoreValue(lore, slot.getType());
+            return form != null && type != null && 
+                   form.equalsIgnoreCase(slot.getForm()) && 
+                   type.equalsIgnoreCase(slot.getType());
         }
 
-        // Check lore for slot validation
-        List<String> lore = meta.getLore();
-        if (lore != null) {
-            String formTag = configManager.getItemForm() + ": " + slot.getType(); // "Type: Ring"
-            for (String line : lore) {
-                if (line.equalsIgnoreCase(formTag)) {
-                    return true;
+        // Clean up the lore for matching
+        List<String> cleanLore = new ArrayList<>();
+        for (String line : lore) {
+            // Handle JSON component format
+            if (line.contains("\"extra\"")) {
+                // Extract text from JSON components
+                String cleanLine = line.replaceAll("\\{\"extra\":\\[.*?\"text\":\"([^\"]*)\".*?\\]}", "$1")
+                                     .replaceAll("\\{\"text\":\"([^\"]*)\"\\}", "$1")
+                                     .replaceAll("§.", "")
+                                     .replaceAll("\"", "")
+                                     .trim();
+                if (!cleanLine.isEmpty()) {
+                    cleanLore.add(cleanLine);
+                }
+            } else {
+                // Handle regular lore format
+                String cleanLine = line.replaceAll("§.", "")
+                                     .replaceAll("\\{\"text\":\"", "")
+                                     .replaceAll("\"\\}", "")
+                                     .replaceAll("\"", "")
+                                     .trim();
+                if (!cleanLine.isEmpty()) {
+                    cleanLore.add(cleanLine);
                 }
             }
         }
+
+        // Debug output for lore matching
+        configManager.debug("Checking lore match for item: " + item.getType());
+        configManager.debug("Lore match pattern: " + loreMatch);
+        configManager.debug("Cleaned lore lines: " + cleanLore);
+
+        // Check for exact match
+        for (String line : cleanLore) {
+            if (line.equalsIgnoreCase(loreMatch)) {
+                configManager.debug("Found exact match: " + line);
+                return true;
+            }
+        }
+
+        // Handle multi-line matches
+        if (loreMatch.contains(":")) {
+            String[] parts = loreMatch.split(":", 2);
+            String key = parts[0].trim().toLowerCase();
+            String value = parts[1].trim().toLowerCase();
+            
+            // Look for the key part
+            for (int i = 0; i < cleanLore.size(); i++) {
+                String line = cleanLore.get(i).toLowerCase();
+                
+                // Case 1: "Form:" on one line, "Active" on next
+                if (line.equals(key + ":")) {
+                    if (i + 1 < cleanLore.size()) {
+                        String nextLine = cleanLore.get(i + 1).toLowerCase();
+                        if (nextLine.equals(value)) {
+                            configManager.debug("Found split match: " + line + " + " + nextLine);
+                            return true;
+                        }
+                    }
+                }
+                
+                // Case 2: "Form" on one line, ":" on next, "Active" on next
+                if (line.equals(key)) {
+                    if (i + 2 < cleanLore.size()) {
+                        String colonLine = cleanLore.get(i + 1).toLowerCase();
+                        String valueLine = cleanLore.get(i + 2).toLowerCase();
+                        if (colonLine.equals(":") && valueLine.equals(value)) {
+                            configManager.debug("Found triple split match: " + line + " + " + colonLine + " + " + valueLine);
+                            return true;
+                        }
+                    }
+                }
+                
+                // Case 3: "Form: Active" on one line
+                if (line.startsWith(key + ":")) {
+                    String afterColon = line.substring((key + ":").length()).trim();
+                    if (afterColon.equals(value)) {
+                        configManager.debug("Found inline match: " + line);
+                        return true;
+                    }
+                }
+            }
+        }
+
+        configManager.debug("No matching lore found for item");
         return false;
+    }
+
+    private String extractLoreValue(List<String> lore, String key) {
+        if (lore == null || key == null) return null;
+        
+        for (int i = 0; i < lore.size(); i++) {
+            String line = lore.get(i).replaceAll("§.", ""); // Remove color codes
+            String searchPattern = key + ":";
+            int keyIndex = line.toLowerCase().indexOf(searchPattern.toLowerCase());
+            if (keyIndex >= 0) {
+                // Check if value is on same line
+                String afterColon = line.substring(keyIndex + searchPattern.length()).trim();
+                if (!afterColon.isEmpty()) {
+                    return afterColon.replaceAll("[^A-Za-z0-9 _-]", "").trim();
+                }
+                // Check next line for value
+                if (i + 1 < lore.size()) {
+                    String nextLine = lore.get(i + 1).replaceAll("§.", "").trim();
+                    if (!nextLine.isEmpty()) {
+                        return nextLine.replaceAll("[^A-Za-z0-9 _-]", "").trim();
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private boolean isValidArmorForSlot(ItemStack item, String slotType) {
@@ -389,7 +567,7 @@ public class InventoryListener implements Listener {
         }
 
         UUID playerUUID = player.getUniqueId();
-        String slotId = slot.getId();
+        String slotId = slot.getType();
         Map<String, Integer> addedAttributes = new HashMap<>();
 
         for (org.bukkit.NamespacedKey key : container.getKeys()) {
@@ -428,5 +606,54 @@ public class InventoryListener implements Listener {
             PlayerGearData.removePlayerSlotAttributes(playerUUID, slotId);
         }
         playerData.updatePlayerStat(player);
+    }
+
+    private void handleSkillSlotPermissions(Player player, ItemStack item, String slotId) {
+        if (item.getItemMeta() != null) {
+            String displayName = item.getItemMeta().getDisplayName();
+            if (displayName != null) {
+                // Extract the actual name regardless of format
+                String skillName = displayName;
+                
+                // Remove any JSON formatting if present
+                if (displayName.contains("\"text\"")) {
+                    int start = displayName.indexOf("\"text\":\"") + 8;
+                    int end = displayName.indexOf("\"}", start);
+                    if (end > start) {
+                        skillName = displayName.substring(start, end);
+                    }
+                }
+                
+                // Clean up the name
+                skillName = skillName.replaceAll("\"", "").trim();
+                
+                if (skillName.endsWith(" Gem")) {
+                    skillName = skillName.substring(0, skillName.length() - 4).trim()
+                        .toLowerCase().replace(' ', '-');
+                    String permission = "fabled.skill." + skillName;
+                    
+                    // Add permission and track it
+                    PermissionAttachment newAttachment = player.addAttachment(plugin);
+                    newAttachment.setPermission(permission, true);
+                    permissionAttachments.put(player.getUniqueId(), newAttachment);
+                    PlayerGearData.addPlayerPermission(player.getUniqueId(), permission);
+                    configManager.debug("Granted permission: " + permission + " to " + player.getName());
+                }
+            }
+        }
+    }
+
+    private void removeSkillSlotPermissions(Player player, String slotId) {
+        UUID playerUUID = player.getUniqueId();
+        
+        // Remove permission attachment
+        PermissionAttachment attachment = permissionAttachments.remove(playerUUID);
+        if (attachment != null) {
+            attachment.remove();
+        }
+        
+        // Clear stored permissions
+        PlayerGearData.clearPlayerPermissions(playerUUID);
+        configManager.debug("Removed all permissions for " + player.getName() + " from slot " + slotId);
     }
 } 

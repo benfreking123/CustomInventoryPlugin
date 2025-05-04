@@ -1,5 +1,6 @@
 package com.example.custominventoryplugin.inventory;
 
+import com.example.custominventoryplugin.CustomInventoryPlugin;
 import com.example.custominventoryplugin.config.ConfigManager;
 import com.example.custominventoryplugin.data.PlayerGearData;
 import org.bukkit.Bukkit;
@@ -17,10 +18,12 @@ public class GearInventory implements InventoryHolder {
     private final Inventory inventory;
     private final Player player;
     private final ConfigManager configManager;
+    private final CustomInventoryPlugin plugin;
 
-    public GearInventory(Player player, ConfigManager configManager) {
+    public GearInventory(Player player, ConfigManager configManager, CustomInventoryPlugin plugin) {
         this.player = player;
         this.configManager = configManager;
+        this.plugin = plugin;
         this.inventory = Bukkit.createInventory(this, 36, "Gear Menu");
         updateInventory();
     }
