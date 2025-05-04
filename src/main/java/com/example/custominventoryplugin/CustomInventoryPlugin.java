@@ -5,9 +5,14 @@ import com.example.custominventoryplugin.commands.GearCommand;
 import com.example.custominventoryplugin.config.ConfigManager;
 import com.example.custominventoryplugin.data.PlayerGearData;
 import com.example.custominventoryplugin.listeners.InventoryListener;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
-public class CustomInventoryPlugin extends JavaPlugin {
+public class CustomInventoryPlugin extends JavaPlugin implements Listener {
     private ConfigManager configManager;
     
     @Override
@@ -31,18 +36,30 @@ public class CustomInventoryPlugin extends JavaPlugin {
         
         // Register listeners
         getServer().getPluginManager().registerEvents(new InventoryListener(configManager, this), this);
+        getServer().getPluginManager().registerEvents(this, this);
         
         getLogger().info("CustomInventoryPlugin has been enabled!");
     }
     
     @Override
     public void onDisable() {
-        // Save player gear data
-        PlayerGearData.saveData();
+        // The auto-save system will handle saving player data
         getLogger().info("CustomInventoryPlugin has been disabled!");
     }
 
     public ConfigManager getConfigManager() {
         return configManager;
+    }
+
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        Player player = event.getPlayer();
+        PlayerGearData.loadPlayerData(player.getUniqueId());
+    }
+
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        Player player = event.getPlayer();
+        PlayerGearData.unloadPlayerData(player.getUniqueId());
     }
 } 
