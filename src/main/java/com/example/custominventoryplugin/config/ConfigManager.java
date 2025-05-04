@@ -14,12 +14,11 @@ public class ConfigManager {
     private final Plugin plugin;
     private FileConfiguration config;
     private boolean debugMode;
+    private boolean overrideEKey;
     private final Map<String, Integer> armorSlots;
     private final Map<String, CustomSlot> customSlots;
     private final NamespacedKey formKey;
     private final NamespacedKey typeKey;
-    private String itemForm;
-    private String itemType;
 
     public ConfigManager(Plugin plugin) {
         this.plugin = plugin;
@@ -42,6 +41,9 @@ public class ConfigManager {
             // Load debug mode
             debugMode = config.getBoolean("debug.enabled", false);
             
+            // Load general settings
+            overrideEKey = config.getBoolean("general.override-e-key", true);
+            
             // Load armor slots
             armorSlots.clear();
             armorSlots.put("helmet", config.getInt("armor-slots.helmet", 0));
@@ -51,7 +53,7 @@ public class ConfigManager {
             
             // Validate armor slots
             for (Map.Entry<String, Integer> entry : armorSlots.entrySet()) {
-                if (entry.getValue() < 0 || entry.getValue() >= 36) {
+                if (entry.getValue() < 0 || entry.getValue() >= 54) {
                     plugin.getLogger().warning("Invalid armor slot position for " + entry.getKey() + ": " + entry.getValue());
                     // Reset to default position
                     switch (entry.getKey()) {
@@ -71,7 +73,7 @@ public class ConfigManager {
                     int position = config.getInt(path + ".position", 0);
                     
                     // Validate position
-                    if (position < 0 || position >= 36) {
+                    if (position < 0 || position >= 54) {
                         plugin.getLogger().warning("Invalid position for custom slot " + key + ": " + position);
                         position = 0; // Reset to default
                     }
@@ -87,10 +89,6 @@ public class ConfigManager {
                     customSlots.put(key, slot);
                 }
             }
-
-            // Load item type settings
-            itemForm = config.getString("item-types.form", "Type");
-            itemType = config.getString("item-types.type", "Ring");
             
             // Save any corrected values
             saveConfig();
@@ -112,26 +110,6 @@ public class ConfigManager {
 
     public void reloadConfig() {
         loadConfig();
-    }
-
-    public void setItemForm(String form) {
-        this.itemForm = form;
-        config.set("item-types.form", form);
-        saveConfig();
-    }
-
-    public void setItemType(String type) {
-        this.itemType = type;
-        config.set("item-types.type", type);
-        saveConfig();
-    }
-
-    public String getItemForm() {
-        return itemForm;
-    }
-
-    public String getItemType() {
-        return itemType;
     }
 
     public int getArmorSlot(String type) {
@@ -162,6 +140,9 @@ public class ConfigManager {
 
     private void saveConfig() {
         try {
+            // Save general settings
+            config.set("general.override-e-key", overrideEKey);
+            
             // Save armor slots
             for (Map.Entry<String, Integer> entry : armorSlots.entrySet()) {
                 config.set("armor-slots." + entry.getKey(), entry.getValue());
@@ -181,8 +162,6 @@ public class ConfigManager {
             
             // Save other settings
             config.set("debug.enabled", debugMode);
-            config.set("item-types.form", itemForm);
-            config.set("item-types.type", itemType);
             
             config.save(new File(plugin.getDataFolder(), "settings.yml"));
         } catch (Exception e) {
@@ -230,5 +209,15 @@ public class ConfigManager {
         public String getLoreMatch() {
             return loreMatch;
         }
+    }
+
+    public boolean isOverrideEKey() {
+        return overrideEKey;
+    }
+
+    public void setOverrideEKey(boolean overrideEKey) {
+        this.overrideEKey = overrideEKey;
+        config.set("general.override-e-key", overrideEKey);
+        saveConfig();
     }
 } 

@@ -5,6 +5,7 @@ import com.example.custominventoryplugin.commands.GearCommand;
 import com.example.custominventoryplugin.config.ConfigManager;
 import com.example.custominventoryplugin.data.PlayerGearData;
 import com.example.custominventoryplugin.listeners.InventoryListener;
+import com.example.custominventoryplugin.listeners.InventoryOpenListener;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -31,11 +32,12 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
         }
 
         // Register commands
-        getCommand("gear").setExecutor(new GearCommand(configManager, this));
+        getCommand("ci").setExecutor(new GearCommand(configManager, this));
         getCommand("debug").setExecutor(new DebugCommand(configManager));
         
         // Register listeners
         getServer().getPluginManager().registerEvents(new InventoryListener(configManager, this), this);
+        getServer().getPluginManager().registerEvents(new InventoryOpenListener(configManager, this), this);
         getServer().getPluginManager().registerEvents(this, this);
         
         getLogger().info("CustomInventoryPlugin has been enabled!");

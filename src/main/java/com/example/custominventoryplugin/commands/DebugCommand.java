@@ -25,7 +25,7 @@ public class DebugCommand implements CommandExecutor, TabCompleter {
         }
 
         if (args.length == 0) {
-            sender.sendMessage("§cUsage: /debug <toggle|reload|form|type> [value]");
+            sender.sendMessage("§cUsage: /debug <toggle|reload>");
             return true;
         }
 
@@ -41,26 +41,8 @@ public class DebugCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage("§aConfiguration reloaded");
                 break;
 
-            case "form":
-                if (args.length < 2) {
-                    sender.sendMessage("§cUsage: /debug form <text>");
-                    return true;
-                }
-                configManager.setItemForm(args[1]);
-                sender.sendMessage("§aItem form text set to: " + args[1]);
-                break;
-
-            case "type":
-                if (args.length < 2) {
-                    sender.sendMessage("§cUsage: /debug type <text>");
-                    return true;
-                }
-                configManager.setItemType(args[1]);
-                sender.sendMessage("§aItem type text set to: " + args[1]);
-                break;
-
             default:
-                sender.sendMessage("§cUnknown subcommand. Use: toggle, reload, form, or type");
+                sender.sendMessage("§cUnknown subcommand. Use: toggle or reload");
                 break;
         }
 
@@ -74,8 +56,6 @@ public class DebugCommand implements CommandExecutor, TabCompleter {
         if (args.length == 1) {
             completions.add("toggle");
             completions.add("reload");
-            completions.add("form");
-            completions.add("type");
         }
 
         return completions;

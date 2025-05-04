@@ -10,9 +10,9 @@ commands:
     description: Adds 5 to your Strength attribute
     usage: /<command>
     permission: custominventory.addstrength
-  gear:
-    description: Opens the gear inventory
-    usage: /<command>
+  ci:
+    description: Custom Inventory commands
+    usage: /<command> [reload]
     permission: custominventory.use
   debug:
     description: Debug commands for CustomInventory
@@ -21,7 +21,7 @@ commands:
 
 permissions:
   custominventory.use:
-    description: Allows use of the gear command
+    description: Allows use of the custom inventory commands
     default: true
   custominventory.debug:
     description: Allows use of debug commands

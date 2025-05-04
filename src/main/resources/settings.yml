@@ -3,6 +3,10 @@ debug:
   enabled: false
   log-level: INFO # DEBUG, INFO, WARNING, ERROR
 
+# General settings
+general:
+  override-e-key: true # Whether to override the default inventory key (E)
+
 # Armor slots (fixed positions)
 armor-slots:
   helmet: 0
@@ -69,9 +73,4 @@ custom-slots:
       form: "Type"
       type: "Trinket"
       position: 30
-      lore_match: "Type: Trinket"
-
-# Item type settings
-item-types:
-  form: "Type"  # The form text (e.g., "Type: Ring")
-  type: "Ring"  # The type text (e.g., "Type: Ring") 
+      lore_match: "Type: Trinket" 

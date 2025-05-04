@@ -24,7 +24,7 @@ public class GearInventory implements InventoryHolder {
         this.player = player;
         this.configManager = configManager;
         this.plugin = plugin;
-        this.inventory = Bukkit.createInventory(this, 36, "Gear Menu");
+        this.inventory = Bukkit.createInventory(this, 54, "Gear Menu");
         updateInventory();
     }
 
@@ -64,7 +64,7 @@ public class GearInventory implements InventoryHolder {
         
         // Fill non-slot positions with glass panes
         ItemStack glass = new ItemStack(Material.GRAY_STAINED_GLASS_PANE);
-        for (int slot = 0; slot < 36; slot++) {
+        for (int slot = 0; slot < 54; slot++) {
             final int currentSlot = slot;
             // Only fill with glass if:
             // 1. The slot is not an armor slot

@@ -20,8 +20,19 @@ public class GearCommand implements CommandExecutor {
     
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
+        if (args.length > 0 && args[0].equalsIgnoreCase("reload")) {
+            if (!sender.hasPermission("custominventory.debug")) {
+                sender.sendMessage("§cYou don't have permission to use this command!");
+                return true;
+            }
+            
+            plugin.getConfigManager().reloadConfig();
+            sender.sendMessage("§aCustom Inventory configuration reloaded!");
+            return true;
+        }
+        
         if (!(sender instanceof Player)) {
-            sender.sendMessage("This command can only be used by players!");
+            sender.sendMessage("§cThis command can only be used by players!");
             return true;
         }
 
