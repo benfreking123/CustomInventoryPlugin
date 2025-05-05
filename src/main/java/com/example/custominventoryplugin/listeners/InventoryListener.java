@@ -139,6 +139,50 @@ public class InventoryListener implements Listener {
             return;
         }
 
+        // Handle shift-click from GUI to player inventory
+        if (event.isShiftClick() && event.getClickedInventory() == event.getView().getTopInventory()) {
+            ItemStack clickedItem = event.getCurrentItem();
+            if (clickedItem == null || clickedItem.getType().isAir()) {
+                return;
+            }
+
+            // Cancel vanilla shift-click behavior
+            event.setCancelled(true);
+
+            // Check if the clicked slot is a custom slot
+            Map<String, ConfigManager.CustomSlot> customSlots = configManager.getCustomSlots();
+            for (Map.Entry<String, ConfigManager.CustomSlot> entry : customSlots.entrySet()) {
+                String slotId = entry.getKey();
+                ConfigManager.CustomSlot customSlot = entry.getValue();
+                if (customSlot.getPosition() == event.getRawSlot()) {
+                    // Try to add to player inventory
+                    PlayerInventory playerInv = player.getInventory();
+                    if (playerInv.firstEmpty() != -1) {
+                        // Remove from custom slot
+                        event.setCurrentItem(null);
+                        PlayerGearData.removePlayerGear(player.getUniqueId(), slotId);
+                        
+                        // Remove attributes or permissions based on slot type
+                        if ("skill".equalsIgnoreCase(customSlot.getSlotType())) {
+                            removeSkillSlotPermissions(player, slotId);
+                        } else if ("attribute".equalsIgnoreCase(customSlot.getSlotType())) {
+                            removeSlotAttributes(player, slotId);
+                        }
+                        
+                        // Add to player inventory
+                        playerInv.addItem(clickedItem);
+                        
+                        // Update inventory display
+                        if (event.getInventory().getHolder() instanceof GearInventory gearInventory) {
+                            gearInventory.updateInventory();
+                        }
+                    }
+                    return;
+                }
+            }
+            return;
+        }
+
         // Handle normal clicks and drags
         if (event.getClickedInventory() == event.getView().getTopInventory()) {
             // Check if the slot is a custom slot
@@ -151,59 +195,55 @@ public class InventoryListener implements Listener {
                         event.setCancelled(true);
                         return;
                     }
+
+                    // Cancel the event to handle it ourselves
+                    event.setCancelled(true);
                     
                     // Handle item placement
                     if (event.getCursor() != null && !event.getCursor().getType().isAir()) {
                         if (!isValidItemForSlot(event.getCursor(), customSlot)) {
-                            event.setCancelled(true);
                             return;
                         }
                         
                         // Store the item in PlayerGearData
                         configManager.debug("Placing item in custom slot " + slotId + ": " + event.getCursor().getType());
-                        PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, event.getCursor().clone());
+                        ItemStack newItem = event.getCursor().clone();
+                        PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, newItem);
+                        
+                        // Update the slot in the GUI
+                        event.getInventory().setItem(event.getRawSlot(), newItem);
                         
                         // If this is a skill slot, handle permissions
                         if ("skill".equalsIgnoreCase(customSlot.getSlotType())) {
-                            handleSkillSlotPermissions(player, event.getCursor(), slotId);
+                            handleSkillSlotPermissions(player, newItem, slotId);
                         }
+                        
+                        // Clear the cursor
+                        event.setCursor(null);
                     }
-                    
                     // Handle item removal
-                    if (event.getCurrentItem() != null) {
-                        if (event.isShiftClick() || event.getCursor() == null || event.getCursor().getType().isAir()) {
-                            // Remove the item from PlayerGearData when:
-                            // 1. Shift-clicking
-                            // 2. Clicking with empty cursor (picking up)
-                            configManager.debug("Removing item from custom slot " + slotId + " (shift/empty)");
-                            PlayerGearData.removePlayerGear(player.getUniqueId(), slotId);
-                            
-                            // Remove attributes or permissions based on slot type
-                            if ("skill".equalsIgnoreCase(customSlot.getSlotType())) {
-                                removeSkillSlotPermissions(player, slotId);
-                            } else if ("attribute".equalsIgnoreCase(customSlot.getSlotType())) {
-                                removeSlotAttributes(player, slotId);
-                            }
-                        } else if (event.getCursor() != null && !event.getCursor().getType().isAir()) {
-                            // If swapping items, remove the old one and store the new one
-                            configManager.debug("Swapping items in custom slot " + slotId);
-                            configManager.debug("Removing old item: " + event.getCurrentItem().getType());
-                            configManager.debug("Storing new item: " + event.getCursor().getType());
-                            
-                            // Remove old permissions/attributes
-                            if ("skill".equalsIgnoreCase(customSlot.getSlotType())) {
-                                removeSkillSlotPermissions(player, slotId);
-                            } else if ("attribute".equalsIgnoreCase(customSlot.getSlotType())) {
-                                removeSlotAttributes(player, slotId);
-                            }
-                            
-                            // Store new item
-                            PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, event.getCursor().clone());
-                            
-                            // Handle new permissions if it's a skill slot
-                            if ("skill".equalsIgnoreCase(customSlot.getSlotType())) {
-                                handleSkillSlotPermissions(player, event.getCursor(), slotId);
-                            }
+                    else if (event.getCurrentItem() != null) {
+                        // Picking up an item
+                        ItemStack currentItem = event.getCurrentItem().clone();
+                        
+                        // Remove the item from PlayerGearData
+                        configManager.debug("Removing item from custom slot " + slotId + " (pickup)");
+                        PlayerGearData.removePlayerGear(player.getUniqueId(), slotId);
+                        
+                        // Remove attributes or permissions based on slot type
+                        if ("skill".equalsIgnoreCase(customSlot.getSlotType())) {
+                            removeSkillSlotPermissions(player, slotId);
+                        } else if ("attribute".equalsIgnoreCase(customSlot.getSlotType())) {
+                            removeSlotAttributes(player, slotId);
+                        }
+                        
+                        // Clear the slot and set the cursor
+                        event.setCurrentItem(null);
+                        event.setCursor(currentItem);
+                        
+                        // Update inventory display
+                        if (event.getInventory().getHolder() instanceof GearInventory gearInventory) {
+                            gearInventory.updateInventory();
                         }
                     }
                     return;

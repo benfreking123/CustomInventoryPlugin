@@ -27,11 +27,11 @@ custom-slots:
       lore_match: "Type: Ring"
     1:
       enabled: true
-      slot-type: "skill"
+      slot-type: "attribute"
       form: "Form"
       type: "Active"
       position: 3
-      lore_match: "Form: Active"
+      lore_match: "Type: Ring"
     2:
       enabled: false
       slot-type: "attribute"
