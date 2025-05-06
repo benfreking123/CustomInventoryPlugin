@@ -8,6 +8,7 @@ import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -44,6 +45,14 @@ public class InventoryListener implements Listener {
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
         if (!(event.getInventory().getHolder() instanceof GearInventory)) {
+            return;
+        }
+
+        // Prevent double clicks and number key clicks
+        if (event.getClick().isRightClick() && event.getClick().isShiftClick() || 
+            event.getClick() == ClickType.NUMBER_KEY || 
+            event.getClick() == ClickType.DOUBLE_CLICK) {
+            event.setCancelled(true);
             return;
         }
 
@@ -156,13 +165,10 @@ public class InventoryListener implements Listener {
         Player player = (Player) event.getPlayer();
         UUID playerUUID = player.getUniqueId();
         
-        // Remove existing gear attributes
-        attributeHandler.removeGearAttributes(player);
-        
         // Remove existing permissions
         skillHandler.removeAllPermissions(player);
         
-        // Apply new gear attributes and handle skills
+        // Apply skills for any skill slots
         Map<String, ConfigManager.CustomSlot> customSlots = configManager.getCustomSlots();
         for (Map.Entry<String, ConfigManager.CustomSlot> entry : customSlots.entrySet()) {
             String slotId = entry.getKey();
@@ -173,8 +179,6 @@ public class InventoryListener implements Listener {
             if (gear != null && !gear.getType().isAir()) {
                 if ("skill".equalsIgnoreCase(slot.getSlotType())) {
                     skillHandler.handleSkillSlot(player, gear, slotId);
-                } else if ("attribute".equalsIgnoreCase(slot.getSlotType())) {
-                    attributeHandler.applyGearAttributes(player, gear, slot);
                 }
             }
         }
@@ -203,17 +207,21 @@ class SlotHandler {
             if (customSlot.isEnabled() && isValidItemForSlot(clickedItem, customSlot)) {
                 ItemStack slotItem = event.getInventory().getItem(guiSlot);
                 if (slotItem == null || slotItem.getType().isAir()) {
-                    // Place item in GUI
-                    event.getInventory().setItem(guiSlot, clickedItem.clone());
+                    // Create a single item for the slot
+                    ItemStack singleItem = clickedItem.clone();
+                    singleItem.setAmount(1);
+                    
+                    // Place single item in GUI
+                    event.getInventory().setItem(guiSlot, singleItem);
                     
                     // Update player data
                     configManager.debug("Shift-clicking item into custom slot " + slotId + ": " + clickedItem.getType());
-                    PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, clickedItem.clone());
+                    PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, singleItem);
                     
                     // Handle slot-specific logic
-                    handleSlotTypeLogic(player, clickedItem, customSlot, slotId);
+                    handleSlotTypeLogic(player, singleItem, customSlot, slotId);
                     
-                    // Remove from player's inventory
+                    // Remove one item from player's inventory
                     clickedItem.setAmount(clickedItem.getAmount() - 1);
                     if (clickedItem.getAmount() <= 0) {
                         event.setCurrentItem(null);
@@ -269,7 +277,8 @@ class SlotHandler {
                 removeSlotEffects(player, customSlot, slotId);
                 PlayerGearData.removePlayerGear(player.getUniqueId(), slotId);
 
-                // Place cursor item in slot
+                // Place cursor item in slot (limit to 1)
+                cursorItem.setAmount(1);
                 PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, cursorItem);
                 event.getInventory().setItem(event.getRawSlot(), cursorItem);
                 handleSlotTypeLogic(player, cursorItem, customSlot, slotId);
@@ -288,9 +297,10 @@ class SlotHandler {
                 return;
             }
             
-            // Store the item in PlayerGearData
+            // Store the item in PlayerGearData (limit to 1)
             configManager.debug("Placing item in custom slot " + slotId + ": " + event.getCursor().getType());
             ItemStack newItem = event.getCursor().clone();
+            newItem.setAmount(1);
             PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, newItem);
             
             // Update the slot in the GUI
@@ -299,8 +309,15 @@ class SlotHandler {
             // Handle slot-specific logic
             handleSlotTypeLogic(player, newItem, customSlot, slotId);
             
-            // Clear the cursor
-            event.setCursor(null);
+            // Return remaining items to cursor
+            ItemStack cursorItem = event.getCursor();
+            cursorItem.setAmount(cursorItem.getAmount() - 1);
+            if (cursorItem.getAmount() <= 0) {
+                event.setCursor(null);
+            } else {
+                event.setCursor(cursorItem);
+            }
+            
             updateInventory(event);
         }
         // Handle item removal (only slot has item)
@@ -340,8 +357,23 @@ class SlotHandler {
                         event.setCancelled(true);
                         return;
                     }
+
+                    // Remove effects of any existing item
+                    removeSlotEffects(player, customSlot, slotId);
+                    PlayerGearData.removePlayerGear(player.getUniqueId(), slotId);
                     
-                    PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, draggedItem);
+                    // Set the new item
+                    ItemStack newItem = draggedItem.clone();
+                    newItem.setAmount(1);
+                    PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, newItem);
+                    
+                    // Handle slot-specific logic
+                    handleSlotTypeLogic(player, newItem, customSlot, slotId);
+                    
+                    // Update the inventory
+                    if (event.getInventory().getHolder() instanceof GearInventory gearInventory) {
+                        gearInventory.updateInventory();
+                    }
                     return;
                 }
             }
@@ -645,6 +677,7 @@ class AttributeHandler {
                     configManager.debug("Removed attribute " + attribute + " with value " + value + " from " + player.getName());
                 }
             }
+            // Clear the attributes after removing them
             PlayerGearData.clearPlayerSlotAttributes(playerUUID);
         }
         playerData.updatePlayerStat(player);
@@ -690,6 +723,7 @@ class AttributeHandler {
             }
         }
 
+        // Store the attributes for this slot
         PlayerGearData.setPlayerSlotAttributes(playerUUID, slotId, addedAttributes);
         playerData.updatePlayerStat(player);
     }
@@ -705,6 +739,7 @@ class AttributeHandler {
                 playerData.giveAttribute(entry.getKey(), -entry.getValue());
                 configManager.debug("Removed attribute " + entry.getKey() + " with value " + entry.getValue() + " from " + player.getName());
             }
+            // Remove the attributes from storage after removing them from the player
             PlayerGearData.removePlayerSlotAttributes(playerUUID, slotId);
         }
         playerData.updatePlayerStat(player);

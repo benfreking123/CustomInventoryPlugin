@@ -18,20 +18,20 @@ armor-slots:
 # Lore Format <form>: <type>
 custom-slots:
   slots:
-    0:
+    '0':
       enabled: true
-      slot-type: "attribute"
-      form: "Type"
-      type: "Ring"
+      slot-type: attribute
+      form: Type
+      type: Ring
       position: 2
-      lore_match: "Type: Ring"
-    1:
+      lore_match: 'Type: Ring'
+    '1':
       enabled: true
-      slot-type: "attribute"
-      form: "Form"
-      type: "Active"
+      slot-type: attribute
+      form: Type
+      type: Ring
       position: 3
-      lore_match: "Type: Ring"
+      lore_match: 'Type: Ring'
     2:
       enabled: false
       slot-type: "attribute"
