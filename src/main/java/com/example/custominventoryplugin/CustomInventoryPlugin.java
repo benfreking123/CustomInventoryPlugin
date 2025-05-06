@@ -8,6 +8,7 @@ import com.example.custominventoryplugin.listeners.InventoryListener;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.InventoryEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -61,5 +62,9 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         PlayerGearData.unloadPlayerData(player.getUniqueId());
+    }
+
+    private void updateInventory(InventoryEvent event) {
+        // Implementation here
     }
 } 

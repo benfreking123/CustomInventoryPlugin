@@ -1,9 +1,13 @@
-com\example\custominventoryplugin\config\ConfigManager.class
 com\example\custominventoryplugin\data\PlayerGearData.class
+com\example\custominventoryplugin\listeners\SkillHandler.class
 com\example\custominventoryplugin\commands\GearCommand.class
+com\example\custominventoryplugin\CustomInventoryPlugin.class
+com\example\custominventoryplugin\listeners\ArmorHandler.class
+com\example\custominventoryplugin\listeners\SlotHandler.class
+com\example\custominventoryplugin\config\ConfigManager.class
+com\example\custominventoryplugin\listeners\AttributeHandler.class
 com\example\custominventoryplugin\data\PlayerGearData$1.class
 com\example\custominventoryplugin\inventory\GearInventory.class
-com\example\custominventoryplugin\CustomInventoryPlugin.class
 com\example\custominventoryplugin\listeners\InventoryListener.class
 com\example\custominventoryplugin\commands\DebugCommand.class
 com\example\custominventoryplugin\config\ConfigManager$CustomSlot.class
