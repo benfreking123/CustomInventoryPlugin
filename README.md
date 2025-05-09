@@ -3,7 +3,7 @@ Dependacies:
 - Fabled
 - Divinity
 
-/gear command opens a custom inventory window
+/ci command opens a custom inventory window
 
 settings.yml allows for setting custom slots as new equiptable slots
 Items allowed in each slot must have the lore formatting of 
