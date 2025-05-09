@@ -16,10 +16,6 @@ debug:
   enabled: false
   log-level: INFO # DEBUG, INFO, WARNING, ERROR
 
-# General settings
-general:
-  override-e-key: true # Whether to override the default inventory key (E)
-
 # Armor slots (fixed positions)
 armor-slots:
   helmet: 0
