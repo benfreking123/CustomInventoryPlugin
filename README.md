@@ -3,7 +3,7 @@ Dependacies:
 - Fabled
 - Divinity
 
-/gear command opens a custom inventory window
+/ci command opens a custom inventory window
 
 settings.yml allows for setting custom slots as new equiptable slots
 Items allowed in each slot must have the lore formatting of 
@@ -27,49 +27,60 @@ armor-slots:
 # Lore Format <form>: <type>
 custom-slots:
   slots:
-    0:
+    '0':
       enabled: true
-      form: "Type"
-      type: "Ring"
+      slot-type: attribute
+      form: Type
+      type: Ring
       position: 2
-    1:
-      enabled: false
-      form: "Type"
-      type: "Amulet"
+      lore_match: 'Type: Ring'
+    '1':
+      enabled: true
+      slot-type: attribute
+      form: Type
+      type: Ring
       position: 3
+      lore_match: 'Type: Ring'
     2:
       enabled: false
+      slot-type: "attribute"
       form: "Type"
       type: "Bracelet"
       position: 11
+      lore_match: "Type: Bracelet"
     3:
       enabled: false
+      slot-type: "attribute"
       form: "Type"
       type: "Relic"
       position: 12
+      lore_match: "Type: Relic"
     4:
       enabled: false
+      slot-type: "attribute"
       form: "Type"
       type: "Talisman"
       position: 20
+      lore_match: "Type: Talisman"
     5:
       enabled: false
+      slot-type: "attribute"
       form: "Type"
       type: "Charm"
       position: 21
+      lore_match: "Type: Charm"
     6:
       enabled: false
+      slot-type: "attribute"
       form: "Type"
       type: "Medallion"
       position: 29
+      lore_match: "Type: Medallion"
     7:
       enabled: false
+      slot-type: "attribute"
       form: "Type"
       type: "Trinket"
       position: 30
-
-# Item type settings
-item-types:
-  form: "Type"  # The form text (e.g., "Type: Ring")
-  type: "Ring"  # The type text (e.g., "Type: Ring") 
+      lore_match: "Type: Trinket" 
 ```
