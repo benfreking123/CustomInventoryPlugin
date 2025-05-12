@@ -106,6 +106,12 @@ public class InventoryListener implements Listener {
             return;
         }
 
+        // Check if it's an armor slot - if so, don't cancel the event
+        Map<String, Integer> armorSlots = configManager.getArmorSlots();
+        if (armorSlots.containsValue(event.getRawSlot())) {
+            return; // Let Minecraft handle the armor slot shift-click
+        }
+
         event.setCancelled(true);
         slotHandler.handleShiftClickFromGUI(event, player, clickedItem);
     }
@@ -163,25 +169,8 @@ public class InventoryListener implements Listener {
         }
 
         Player player = (Player) event.getPlayer();
-        UUID playerUUID = player.getUniqueId();
-        
         // Remove existing permissions
         skillHandler.removeAllPermissions(player);
-        
-        // Apply skills for any skill slots
-        Map<String, ConfigManager.CustomSlot> customSlots = configManager.getCustomSlots();
-        for (Map.Entry<String, ConfigManager.CustomSlot> entry : customSlots.entrySet()) {
-            String slotId = entry.getKey();
-            ConfigManager.CustomSlot slot = entry.getValue();
-            if (!slot.isEnabled()) continue;
-
-            ItemStack gear = PlayerGearData.getPlayerGear(playerUUID, slotId);
-            if (gear != null && !gear.getType().isAir()) {
-                if ("skill".equalsIgnoreCase(slot.getSlotType())) {
-                    skillHandler.handleSkillSlot(player, gear, slotId);
-                }
-            }
-        }
     }
 }
 
@@ -199,6 +188,48 @@ class SlotHandler {
         this.attributeHandler = new AttributeHandler(configManager);
     }
 
+    // New unified method to handle slot changes
+    private void handleSlotChange(Player player, String slotId, ConfigManager.CustomSlot slot, ItemStack newItem) {
+        configManager.debug("Handling slot change for slot " + slotId + " for player " + player.getName());
+        
+        // Update PlayerGearData and handle attributes
+        updateSlotAttributes(player, slotId, newItem, slot);
+        
+        // Update the inventory display
+        if (player.getOpenInventory().getTopInventory().getHolder() instanceof GearInventory gearInventory) {
+            gearInventory.updateInventory();
+        }
+    }
+
+    private void updateSlotAttributes(Player player, String slotId, ItemStack newItem, ConfigManager.CustomSlot slot) {
+        configManager.debug("Updating attributes for slot " + slotId + " for player " + player.getName());
+        configManager.debug("Slot type: " + slot.getSlotType());
+        
+        // Always remove old attributes first if this is an attribute slot
+        if ("attribute".equalsIgnoreCase(slot.getSlotType())) {
+            configManager.debug("Removing attributes from slot " + slotId + " for " + player.getName());
+            attributeHandler.removeSlotAttributes(player, slotId);
+        }
+
+        // Update PlayerGearData and apply new attributes if there's a valid item
+        if (newItem != null && !newItem.getType().isAir()) {
+            configManager.debug("Setting new item in slot " + slotId + ": " + newItem.getType());
+            PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, newItem);
+            if ("attribute".equalsIgnoreCase(slot.getSlotType())) {
+                configManager.debug("Applying new attributes for slot " + slotId);
+                attributeHandler.applyGearAttributes(player, newItem, slot, slotId);
+            }
+        } else {
+            configManager.debug("Removing item from slot " + slotId);
+            PlayerGearData.removePlayerGear(player.getUniqueId(), slotId);
+            // Ensure attributes are removed when item is removed
+            if ("attribute".equalsIgnoreCase(slot.getSlotType())) {
+                configManager.debug("Removing attributes after item removal for slot " + slotId);
+                attributeHandler.removeSlotAttributes(player, slotId);
+            }
+        }
+    }
+
     public boolean handleShiftClick(InventoryClickEvent event, Player player, ItemStack clickedItem) {
         for (Map.Entry<String, ConfigManager.CustomSlot> entry : configManager.getCustomSlots().entrySet()) {
             String slotId = entry.getKey();
@@ -207,27 +238,16 @@ class SlotHandler {
             if (customSlot.isEnabled() && isValidItemForSlot(clickedItem, customSlot)) {
                 ItemStack slotItem = event.getInventory().getItem(guiSlot);
                 if (slotItem == null || slotItem.getType().isAir()) {
-                    // Create a single item for the slot
                     ItemStack singleItem = clickedItem.clone();
                     singleItem.setAmount(1);
                     
-                    // Place single item in GUI
+                    handleSlotChange(player, slotId, customSlot, singleItem);
+                    
                     event.getInventory().setItem(guiSlot, singleItem);
-                    
-                    // Update player data
-                    configManager.debug("Shift-clicking item into custom slot " + slotId + ": " + clickedItem.getType());
-                    PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, singleItem);
-                    
-                    // Handle slot-specific logic
-                    handleSlotTypeLogic(player, singleItem, customSlot, slotId);
-                    
-                    // Remove one item from player's inventory
                     clickedItem.setAmount(clickedItem.getAmount() - 1);
                     if (clickedItem.getAmount() <= 0) {
                         event.setCurrentItem(null);
                     }
-                    
-                    updateInventory(event);
                     return true;
                 }
             }
@@ -243,17 +263,14 @@ class SlotHandler {
             if (customSlot.getPosition() == event.getRawSlot()) {
                 PlayerInventory playerInv = player.getInventory();
                 if (playerInv.firstEmpty() != -1) {
-                    // Remove from custom slot
+                    // Remove from custom slot and update attributes
+                    handleSlotChange(player, slotId, customSlot, null);
                     event.setCurrentItem(null);
-                    PlayerGearData.removePlayerGear(player.getUniqueId(), slotId);
-                    
-                    // Remove slot-specific effects
-                    removeSlotEffects(player, customSlot, slotId);
                     
                     // Add to player inventory
                     playerInv.addItem(clickedItem);
                     
-                    updateInventory(event);
+                    return;
                 }
                 return;
             }
@@ -261,7 +278,6 @@ class SlotHandler {
     }
 
     public void handleNormalClick(InventoryClickEvent event, Player player, ConfigManager.CustomSlot customSlot, String slotId) {
-        // Always cancel the event to handle it ourselves
         event.setCancelled(true);
 
         // Handle item swapping (both cursor and slot have items)
@@ -271,24 +287,14 @@ class SlotHandler {
             ItemStack cursorItem = event.getCursor().clone();
             ItemStack slotItem = event.getCurrentItem().clone();
 
-            // Validate both items for the slot
             if (isValidItemForSlot(cursorItem, customSlot) && isValidItemForSlot(slotItem, customSlot)) {
-                // Remove effects of the old slot item
-                removeSlotEffects(player, customSlot, slotId);
-                PlayerGearData.removePlayerGear(player.getUniqueId(), slotId);
-
-                // Place cursor item in slot (limit to 1)
                 cursorItem.setAmount(1);
-                PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, cursorItem);
+                handleSlotChange(player, slotId, customSlot, cursorItem);
                 event.getInventory().setItem(event.getRawSlot(), cursorItem);
-                handleSlotTypeLogic(player, cursorItem, customSlot, slotId);
-
-                // Put old slot item on cursor
                 event.setCursor(slotItem);
-                updateInventory(event);
                 return;
             }
-            return; // Invalid items, don't proceed
+            return;
         }
         
         // Handle item placement (only cursor has item)
@@ -297,19 +303,12 @@ class SlotHandler {
                 return;
             }
             
-            // Store the item in PlayerGearData (limit to 1)
-            configManager.debug("Placing item in custom slot " + slotId + ": " + event.getCursor().getType());
             ItemStack newItem = event.getCursor().clone();
             newItem.setAmount(1);
-            PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, newItem);
+            handleSlotChange(player, slotId, customSlot, newItem);
             
-            // Update the slot in the GUI
             event.getInventory().setItem(event.getRawSlot(), newItem);
             
-            // Handle slot-specific logic
-            handleSlotTypeLogic(player, newItem, customSlot, slotId);
-            
-            // Return remaining items to cursor
             ItemStack cursorItem = event.getCursor();
             cursorItem.setAmount(cursorItem.getAmount() - 1);
             if (cursorItem.getAmount() <= 0) {
@@ -317,26 +316,13 @@ class SlotHandler {
             } else {
                 event.setCursor(cursorItem);
             }
-            
-            updateInventory(event);
         }
         // Handle item removal (only slot has item)
         else if (event.getCurrentItem() != null) {
-            // Picking up an item
             ItemStack currentItem = event.getCurrentItem().clone();
-            
-            // Remove the item from PlayerGearData
-            configManager.debug("Removing item from custom slot " + slotId + " (pickup)");
-            PlayerGearData.removePlayerGear(player.getUniqueId(), slotId);
-            
-            // Remove slot-specific effects
-            removeSlotEffects(player, customSlot, slotId);
-            
-            // Clear the slot and set the cursor
+            handleSlotChange(player, slotId, customSlot, null);
             event.setCurrentItem(null);
             event.setCursor(currentItem);
-            
-            updateInventory(event);
         }
     }
 
@@ -358,47 +344,12 @@ class SlotHandler {
                         return;
                     }
 
-                    // Remove effects of any existing item
-                    removeSlotEffects(player, customSlot, slotId);
-                    PlayerGearData.removePlayerGear(player.getUniqueId(), slotId);
-                    
-                    // Set the new item
                     ItemStack newItem = draggedItem.clone();
                     newItem.setAmount(1);
-                    PlayerGearData.setPlayerGear(player.getUniqueId(), slotId, newItem);
-                    
-                    // Handle slot-specific logic
-                    handleSlotTypeLogic(player, newItem, customSlot, slotId);
-                    
-                    // Update the inventory
-                    if (event.getInventory().getHolder() instanceof GearInventory gearInventory) {
-                        gearInventory.updateInventory();
-                    }
+                    handleSlotChange(player, slotId, customSlot, newItem);
                     return;
                 }
             }
-        }
-    }
-
-    private void handleSlotTypeLogic(Player player, ItemStack item, ConfigManager.CustomSlot slot, String slotId) {
-        if ("skill".equalsIgnoreCase(slot.getSlotType())) {
-            skillHandler.handleSkillSlot(player, item, slotId);
-        } else if ("attribute".equalsIgnoreCase(slot.getSlotType())) {
-            attributeHandler.applyGearAttributes(player, item, slot);
-        }
-    }
-
-    private void removeSlotEffects(Player player, ConfigManager.CustomSlot slot, String slotId) {
-        if ("skill".equalsIgnoreCase(slot.getSlotType())) {
-            skillHandler.removeSkillSlotPermissions(player, slotId);
-        } else if ("attribute".equalsIgnoreCase(slot.getSlotType())) {
-            attributeHandler.removeSlotAttributes(player, slotId);
-        }
-    }
-
-    private void updateInventory(InventoryClickEvent event) {
-        if (event.getInventory().getHolder() instanceof GearInventory gearInventory) {
-            gearInventory.updateInventory();
         }
     }
 
@@ -562,6 +513,42 @@ class ArmorHandler {
         return false;
     }
 
+    public void handleShiftClickFromGUI(InventoryClickEvent event, Player player) {
+        ItemStack clickedItem = event.getCurrentItem();
+        if (clickedItem == null || clickedItem.getType().isAir()) {
+            return;
+        }
+
+        event.setCancelled(true);
+        
+        for (Map.Entry<String, Integer> entry : configManager.getArmorSlots().entrySet()) {
+            String armorType = entry.getKey();
+            if (entry.getValue() == event.getRawSlot()) {
+                PlayerInventory playerInv = player.getInventory();
+                if (playerInv.firstEmpty() != -1) {
+                    // Remove from armor slot
+                    switch (armorType) {
+                        case "helmet" -> playerInv.setHelmet(null);
+                        case "chestplate" -> playerInv.setChestplate(null);
+                        case "leggings" -> playerInv.setLeggings(null);
+                        case "boots" -> playerInv.setBoots(null);
+                    }
+                    
+                    PlayerGearData.removePlayerGear(player.getUniqueId(), armorType);
+                    event.setCurrentItem(null);
+                    
+                    // Add to player inventory
+                    playerInv.addItem(clickedItem);
+                    
+                    if (event.getInventory().getHolder() instanceof GearInventory gearInventory) {
+                        gearInventory.updateInventory();
+                    }
+                }
+                return;
+            }
+        }
+    }
+
     public void handleNormalClick(InventoryClickEvent event, Player player, String armorType) {
         ItemStack item = event.getCursor();
         if (item != null && !item.getType().isAir()) {
@@ -603,12 +590,12 @@ class ArmorHandler {
 class SkillHandler {
     private final ConfigManager configManager;
     private final CustomInventoryPlugin plugin;
-    private final Map<UUID, PermissionAttachment> permissionAttachments;
+    private final Map<UUID, Map<String, PermissionAttachment>> permissionAttachments;
 
     public SkillHandler(ConfigManager configManager, CustomInventoryPlugin plugin, Map<UUID, PermissionAttachment> permissionAttachments) {
         this.configManager = configManager;
         this.plugin = plugin;
-        this.permissionAttachments = permissionAttachments;
+        this.permissionAttachments = new HashMap<>();
     }
 
     public void handleSkillSlot(Player player, ItemStack gear, String slotId) {
@@ -619,10 +606,20 @@ class SkillHandler {
                     .toLowerCase().replace(' ', '-');
                 String permission = "fabled.skill." + skillName;
                 
+                UUID playerUUID = player.getUniqueId();
+                Map<String, PermissionAttachment> playerAttachments = permissionAttachments.computeIfAbsent(playerUUID, k -> new HashMap<>());
+                
+                // Remove any existing attachment for this permission
+                PermissionAttachment oldAttachment = playerAttachments.remove(permission);
+                if (oldAttachment != null) {
+                    oldAttachment.remove();
+                }
+                
+                // Create new attachment
                 PermissionAttachment newAttachment = player.addAttachment(plugin);
                 newAttachment.setPermission(permission, true);
-                permissionAttachments.put(player.getUniqueId(), newAttachment);
-                PlayerGearData.addPlayerPermission(player.getUniqueId(), permission);
+                playerAttachments.put(permission, newAttachment);
+                PlayerGearData.addPlayerPermission(playerUUID, permission);
                 configManager.debug("Granted permission: " + permission + " to " + player.getName());
             }
         }
@@ -630,24 +627,26 @@ class SkillHandler {
 
     public void removeSkillSlotPermissions(Player player, String slotId) {
         UUID playerUUID = player.getUniqueId();
-        
-        PermissionAttachment attachment = permissionAttachments.remove(playerUUID);
-        if (attachment != null) {
-            attachment.remove();
+        Map<String, PermissionAttachment> playerAttachments = permissionAttachments.remove(playerUUID);
+        if (playerAttachments != null) {
+            for (PermissionAttachment attachment : playerAttachments.values()) {
+                attachment.remove();
+            }
         }
-        
         PlayerGearData.clearPlayerPermissions(playerUUID);
         configManager.debug("Removed all permissions for " + player.getName() + " from slot " + slotId);
     }
 
     public void removeAllPermissions(Player player) {
         UUID playerUUID = player.getUniqueId();
-        
-        PermissionAttachment attachment = permissionAttachments.remove(playerUUID);
-        if (attachment != null) {
-            attachment.remove();
+        Map<String, PermissionAttachment> playerAttachments = permissionAttachments.remove(playerUUID);
+        if (playerAttachments != null) {
+            for (PermissionAttachment attachment : playerAttachments.values()) {
+                attachment.remove();
+            }
         }
         PlayerGearData.clearPlayerPermissions(playerUUID);
+        configManager.debug("Removed all permissions for " + player.getName());
     }
 }
 
@@ -659,7 +658,7 @@ class AttributeHandler {
         this.configManager = configManager;
     }
 
-    public void removeGearAttributes(Player player) {
+    public void removeSlotAttributes(Player player, String slotId) {
         PlayerData playerData = Fabled.getData(player);
         if (playerData == null) {
             configManager.debug("Could not get Fabled player data for " + player.getName());
@@ -667,23 +666,27 @@ class AttributeHandler {
         }
 
         UUID playerUUID = player.getUniqueId();
-        Map<String, Map<String, Integer>> slotMap = PlayerGearData.playerSlotAttributes.get(playerUUID);
-        if (slotMap != null) {
-            for (Map.Entry<String, Map<String, Integer>> slotEntry : slotMap.entrySet()) {
-                for (Map.Entry<String, Integer> attrEntry : slotEntry.getValue().entrySet()) {
-                    String attribute = attrEntry.getKey();
-                    int value = attrEntry.getValue();
-                    playerData.giveAttribute(attribute, -value);
-                    configManager.debug("Removed attribute " + attribute + " with value " + value + " from " + player.getName());
-                }
+        Map<String, Integer> attrs = PlayerGearData.getPlayerSlotAttributes(playerUUID, slotId);
+        configManager.debug("Found attributes for slot " + slotId + ": " + attrs);
+        
+        if (!attrs.isEmpty()) {
+            configManager.debug("Removing attributes from slot " + slotId + " for " + player.getName());
+            for (Map.Entry<String, Integer> entry : attrs.entrySet()) {
+                String attribute = entry.getKey();
+                int value = entry.getValue();
+                playerData.giveAttribute(attribute, -value);
+                configManager.debug("Removed attribute " + attribute + " with value " + value + " from " + player.getName());
             }
-            // Clear the attributes after removing them
-            PlayerGearData.clearPlayerSlotAttributes(playerUUID);
+            // Remove the attributes from storage after removing them from the player
+            PlayerGearData.removePlayerSlotAttributes(playerUUID, slotId);
+            configManager.debug("Cleared stored attributes for slot " + slotId);
+        } else {
+            configManager.debug("No attributes found to remove for slot " + slotId);
         }
         playerData.updatePlayerStat(player);
     }
 
-    public void applyGearAttributes(Player player, ItemStack gear, ConfigManager.CustomSlot slot) {
+    public void applyGearAttributes(Player player, ItemStack gear, ConfigManager.CustomSlot slot, String slotId) {
         PlayerData playerData = Fabled.getData(player);
         if (playerData == null) {
             configManager.debug("Could not get Fabled player data for " + player.getName());
@@ -703,9 +706,9 @@ class AttributeHandler {
         }
 
         UUID playerUUID = player.getUniqueId();
-        String slotId = slot.getType();
         Map<String, Integer> addedAttributes = new HashMap<>();
 
+        configManager.debug("Applying attributes from item in slot " + slotId + " for " + player.getName());
         for (org.bukkit.NamespacedKey key : container.getKeys()) {
             String keyStr = key.getKey();
             if (keyStr.startsWith("item_fabled_attr_")) {
@@ -723,24 +726,12 @@ class AttributeHandler {
             }
         }
 
-        // Store the attributes for this slot
-        PlayerGearData.setPlayerSlotAttributes(playerUUID, slotId, addedAttributes);
-        playerData.updatePlayerStat(player);
-    }
-
-    public void removeSlotAttributes(Player player, String slotId) {
-        PlayerData playerData = Fabled.getData(player);
-        if (playerData == null) return;
-
-        UUID playerUUID = player.getUniqueId();
-        Map<String, Integer> attrs = PlayerGearData.getPlayerSlotAttributes(playerUUID, slotId);
-        if (!attrs.isEmpty()) {
-            for (Map.Entry<String, Integer> entry : attrs.entrySet()) {
-                playerData.giveAttribute(entry.getKey(), -entry.getValue());
-                configManager.debug("Removed attribute " + entry.getKey() + " with value " + entry.getValue() + " from " + player.getName());
-            }
-            // Remove the attributes from storage after removing them from the player
-            PlayerGearData.removePlayerSlotAttributes(playerUUID, slotId);
+        // Store the attributes for this slot using the config slot ID
+        if (!addedAttributes.isEmpty()) {
+            PlayerGearData.setPlayerSlotAttributes(playerUUID, slotId, addedAttributes);
+            configManager.debug("Stored attributes for slot " + slotId + ": " + addedAttributes);
+        } else {
+            configManager.debug("No attributes to store for slot " + slotId);
         }
         playerData.updatePlayerStat(player);
     }
