@@ -1,0 +1,9 @@
+# CustomInventoryPlugin runtime configuration.
+# DB credentials default to TheTower's shared MariaDB instance.
+
+database:
+  host: localhost
+  port: 3306
+  name: thetower
+  user: thetower
+  password: 'TowerPass2026!'

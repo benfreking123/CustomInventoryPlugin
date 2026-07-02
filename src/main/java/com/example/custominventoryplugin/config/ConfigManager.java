@@ -1,14 +1,18 @@
 package com.example.custominventoryplugin.config;
 
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.logging.Level;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
-
-import java.io.File;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.logging.Level;
 
 public class ConfigManager {
     private final Plugin plugin;
@@ -19,154 +23,219 @@ public class ConfigManager {
     private final Map<String, CustomSlot> customSlots;
     private final NamespacedKey formKey;
     private final NamespacedKey typeKey;
+    // Gear-menu filler material (non-interactive background) and the pane shown
+    // for permission-locked skill-gem slots. Both configurable via settings.yml.
+    private Material fillPane;
+    private Material lockedPane;
+    // How many Active / Passive skill-gem slots are usable with no permission.
+    // Slots beyond these counts require their per-slot `permission` node.
+    private int defaultActiveSlots;
+    private int defaultPassiveSlots;
 
     public ConfigManager(Plugin plugin) {
         this.plugin = plugin;
-        this.armorSlots = new HashMap<>();
-        this.customSlots = new HashMap<>();
+        this.armorSlots = new HashMap<String, Integer>();
+        this.customSlots = new HashMap<String, CustomSlot>();
         this.formKey = new NamespacedKey(plugin, "form");
         this.typeKey = new NamespacedKey(plugin, "type");
-        loadConfig();
+        this.loadConfig();
     }
 
     public void loadConfig() {
         try {
-            // Save default settings.yml if it doesn't exist
-            plugin.saveResource("settings.yml", false);
-            
-            // Load the config file
-            File configFile = new File(plugin.getDataFolder(), "settings.yml");
-            config = YamlConfiguration.loadConfiguration(configFile);
-            
-            // Load debug mode
-            debugMode = config.getBoolean("debug.enabled", false);
-            
-            // Load general settings
-            overrideEKey = config.getBoolean("general.override-e-key", true);
-            
-            // Load armor slots
-            armorSlots.clear();
-            armorSlots.put("helmet", config.getInt("armor-slots.helmet", 0));
-            armorSlots.put("chestplate", config.getInt("armor-slots.chestplate", 9));
-            armorSlots.put("leggings", config.getInt("armor-slots.leggings", 18));
-            armorSlots.put("boots", config.getInt("armor-slots.boots", 27));
-            
-            // Validate armor slots
-            for (Map.Entry<String, Integer> entry : armorSlots.entrySet()) {
-                if (entry.getValue() < 0 || entry.getValue() >= 54) {
-                    plugin.getLogger().warning("Invalid armor slot position for " + entry.getKey() + ": " + entry.getValue());
-                    // Reset to default position
-                    switch (entry.getKey()) {
-                        case "helmet" -> armorSlots.put("helmet", 0);
-                        case "chestplate" -> armorSlots.put("chestplate", 9);
-                        case "leggings" -> armorSlots.put("leggings", 18);
-                        case "boots" -> armorSlots.put("boots", 27);
+            this.plugin.saveResource("settings.yml", false);
+            File configFile = new File(this.plugin.getDataFolder(), "settings.yml");
+            this.config = YamlConfiguration.loadConfiguration((File)configFile);
+            this.debugMode = this.config.getBoolean("debug.enabled", false);
+            this.overrideEKey = this.config.getBoolean("general.override-e-key", true);
+            this.fillPane = this.parseMaterial(this.config.getString("general.fill-pane", "GRAY_STAINED_GLASS_PANE"), Material.GRAY_STAINED_GLASS_PANE);
+            this.lockedPane = this.parseMaterial(this.config.getString("general.locked-pane", "RED_STAINED_GLASS_PANE"), Material.RED_STAINED_GLASS_PANE);
+            this.defaultActiveSlots = Math.max(0, this.config.getInt("skill-slots.default-active", 3));
+            this.defaultPassiveSlots = Math.max(0, this.config.getInt("skill-slots.default-passive", 2));
+            this.armorSlots.clear();
+            this.armorSlots.put("helmet", this.config.getInt("armor-slots.helmet", 0));
+            this.armorSlots.put("chestplate", this.config.getInt("armor-slots.chestplate", 9));
+            this.armorSlots.put("leggings", this.config.getInt("armor-slots.leggings", 18));
+            this.armorSlots.put("boots", this.config.getInt("armor-slots.boots", 27));
+            for (Map.Entry<String, Integer> entry : this.armorSlots.entrySet()) {
+                if (entry.getValue() >= 0 && entry.getValue() < 54) continue;
+                this.plugin.getLogger().warning("Invalid armor slot position for " + entry.getKey() + ": " + String.valueOf(entry.getValue()));
+                switch (entry.getKey()) {
+                    case "helmet": {
+                        this.armorSlots.put("helmet", 0);
+                        break;
+                    }
+                    case "chestplate": {
+                        this.armorSlots.put("chestplate", 9);
+                        break;
+                    }
+                    case "leggings": {
+                        this.armorSlots.put("leggings", 18);
+                        break;
+                    }
+                    case "boots": {
+                        this.armorSlots.put("boots", 27);
                     }
                 }
             }
-            
-            // Load custom slots
-            customSlots.clear();
-            if (config.getConfigurationSection("custom-slots.slots") != null) {
-                for (String key : config.getConfigurationSection("custom-slots.slots").getKeys(false)) {
+            this.customSlots.clear();
+            if (this.config.getConfigurationSection("custom-slots.slots") != null) {
+                for (String key : this.config.getConfigurationSection("custom-slots.slots").getKeys(false)) {
                     String path = "custom-slots.slots." + key;
-                    int position = config.getInt(path + ".position", 0);
-                    
-                    // Validate position
+                    int position = this.config.getInt(path + ".position", 0);
                     if (position < 0 || position >= 54) {
-                        plugin.getLogger().warning("Invalid position for custom slot " + key + ": " + position);
-                        position = 0; // Reset to default
+                        this.plugin.getLogger().warning("Invalid position for custom slot " + key + ": " + position);
+                        position = 0;
                     }
-                    
-                    CustomSlot slot = new CustomSlot(
-                        config.getBoolean(path + ".enabled", true),
-                        config.getString(path + ".form", "ring"),
-                        config.getString(path + ".type", "accessory"),
-                        position,
-                        config.getString(path + ".slot-type", "skill"),
-                        config.getString(path + ".lore_match", "")
-                    );
-                    customSlots.put(key, slot);
+                    CustomSlot slot = new CustomSlot(this.config.getBoolean(path + ".enabled", true), this.config.getString(path + ".form", "ring"), this.config.getString(path + ".type", "accessory"), position, this.config.getString(path + ".slot-type", "skill"), this.config.getString(path + ".lore_match", ""), this.config.getString(path + ".permission", ""));
+                    this.customSlots.put(key, slot);
                 }
             }
-            
-            // Save any corrected values
-            saveConfig();
-            
-        } catch (Exception e) {
-            plugin.getLogger().log(Level.SEVERE, "Error loading configuration", e);
+            this.saveConfig();
+        }
+        catch (Exception e) {
+            this.plugin.getLogger().log(Level.SEVERE, "Error loading configuration", e);
         }
     }
 
     public boolean isDebugEnabled() {
-        return debugMode;
+        return this.debugMode;
     }
 
     public void setDebugEnabled(boolean enabled) {
         this.debugMode = enabled;
-        config.set("debug.enabled", enabled);
-        saveConfig();
+        this.config.set("debug.enabled", (Object)enabled);
+        this.saveConfig();
     }
 
     public void reloadConfig() {
-        loadConfig();
+        this.loadConfig();
     }
 
     public int getArmorSlot(String type) {
-        return armorSlots.getOrDefault(type, 0);
+        return this.armorSlots.getOrDefault(type, 0);
     }
 
     public Map<String, Integer> getArmorSlots() {
-        return new HashMap<>(armorSlots); // Return a copy to prevent external modification
+        return new HashMap<String, Integer>(this.armorSlots);
     }
 
     public Map<String, CustomSlot> getCustomSlots() {
-        return new HashMap<>(customSlots); // Return a copy to prevent external modification
+        return new HashMap<String, CustomSlot>(this.customSlots);
+    }
+
+    public Material getFillPane() {
+        return this.fillPane;
+    }
+
+    public Material getLockedPane() {
+        return this.lockedPane;
+    }
+
+    public int getDefaultActiveSlots() {
+        return this.defaultActiveSlots;
+    }
+
+    public int getDefaultPassiveSlots() {
+        return this.defaultPassiveSlots;
+    }
+
+    private Material parseMaterial(String name, Material fallback) {
+        if (name == null || name.trim().isEmpty()) {
+            return fallback;
+        }
+        Material material = Material.matchMaterial(name.trim().toUpperCase());
+        if (material == null) {
+            this.plugin.getLogger().warning("Invalid material '" + name + "' in settings.yml; using " + fallback.name());
+            return fallback;
+        }
+        return material;
+    }
+
+    /**
+     * Whether the given skill-gem slot is usable by this player. A slot is unlocked
+     * when its position falls within the configured default-open count for its type
+     * (Active/Passive), OR the player holds the slot's configured permission node.
+     * Non-skill (attribute) slots are never permission-gated and always return true.
+     */
+    public boolean isSkillSlotUnlocked(CustomSlot slot, Player player) {
+        if (slot == null) {
+            return false;
+        }
+        if (!"skill".equalsIgnoreCase(slot.getSlotType())) {
+            return true;
+        }
+        String type = slot.getType();
+        int defaultOpen = "Passive".equalsIgnoreCase(type) ? this.defaultPassiveSlots : this.defaultActiveSlots;
+        List<Integer> positions = new ArrayList<Integer>();
+        for (CustomSlot other : this.customSlots.values()) {
+            if (!"skill".equalsIgnoreCase(other.getSlotType())) continue;
+            if (type == null || !type.equalsIgnoreCase(other.getType())) continue;
+            positions.add(other.getPosition());
+        }
+        Collections.sort(positions);
+        int index = positions.indexOf(slot.getPosition());
+        if (index >= 0 && index < defaultOpen) {
+            return true;
+        }
+        String permission = slot.getPermission();
+        if (permission == null || permission.isEmpty()) {
+            return false;
+        }
+        return player.hasPermission(permission);
     }
 
     public NamespacedKey getFormKey() {
-        return formKey;
+        return this.formKey;
     }
 
     public NamespacedKey getTypeKey() {
-        return typeKey;
+        return this.typeKey;
     }
 
     public void debug(String message) {
-        if (debugMode) {
-            plugin.getLogger().info("[DEBUG] " + message);
+        if (this.debugMode) {
+            this.plugin.getLogger().info("[DEBUG] " + message);
         }
     }
 
     private void saveConfig() {
         try {
-            // Save general settings
-            config.set("general.override-e-key", overrideEKey);
-            
-            // Save armor slots
-            for (Map.Entry<String, Integer> entry : armorSlots.entrySet()) {
-                config.set("armor-slots." + entry.getKey(), entry.getValue());
+            this.config.set("general.override-e-key", (Object)this.overrideEKey);
+            this.config.set("general.fill-pane", (Object)this.fillPane.name());
+            this.config.set("general.locked-pane", (Object)this.lockedPane.name());
+            this.config.set("skill-slots.default-active", (Object)this.defaultActiveSlots);
+            this.config.set("skill-slots.default-passive", (Object)this.defaultPassiveSlots);
+            for (Map.Entry<String, Integer> entry : this.armorSlots.entrySet()) {
+                this.config.set("armor-slots." + entry.getKey(), (Object)entry.getValue());
             }
-            
-            // Save custom slots
-            for (Map.Entry<String, CustomSlot> entry : customSlots.entrySet()) {
+            for (Map.Entry<String, CustomSlot> entry : this.customSlots.entrySet()) {
                 String path = "custom-slots.slots." + entry.getKey();
                 CustomSlot slot = entry.getValue();
-                config.set(path + ".enabled", slot.isEnabled());
-                config.set(path + ".form", slot.getForm());
-                config.set(path + ".type", slot.getType());
-                config.set(path + ".position", slot.getPosition());
-                config.set(path + ".slot-type", slot.getSlotType());
-                config.set(path + ".lore_match", slot.getLoreMatch());
+                this.config.set(path + ".enabled", (Object)slot.isEnabled());
+                this.config.set(path + ".form", (Object)slot.getForm());
+                this.config.set(path + ".type", (Object)slot.getType());
+                this.config.set(path + ".position", (Object)slot.getPosition());
+                this.config.set(path + ".slot-type", (Object)slot.getSlotType());
+                this.config.set(path + ".lore_match", (Object)slot.getLoreMatch());
+                this.config.set(path + ".permission", (Object)slot.getPermission());
             }
-            
-            // Save other settings
-            config.set("debug.enabled", debugMode);
-            
-            config.save(new File(plugin.getDataFolder(), "settings.yml"));
-        } catch (Exception e) {
-            plugin.getLogger().log(Level.SEVERE, "Could not save config to settings.yml", e);
+            this.config.set("debug.enabled", (Object)this.debugMode);
+            this.config.save(new File(this.plugin.getDataFolder(), "settings.yml"));
         }
+        catch (Exception e) {
+            this.plugin.getLogger().log(Level.SEVERE, "Could not save config to settings.yml", e);
+        }
+    }
+
+    public boolean isOverrideEKey() {
+        return this.overrideEKey;
+    }
+
+    public void setOverrideEKey(boolean overrideEKey) {
+        this.overrideEKey = overrideEKey;
+        this.config.set("general.override-e-key", (Object)overrideEKey);
+        this.saveConfig();
     }
 
     public static class CustomSlot {
@@ -174,50 +243,47 @@ public class ConfigManager {
         private final String form;
         private final String type;
         private final int position;
-        private final String slotType; // "skill" or "attribute"
-        private final String loreMatch; // Custom lore matching pattern
+        private final String slotType;
+        private final String loreMatch;
+        private final String permission;
 
-        public CustomSlot(boolean enabled, String form, String type, int position, String slotType, String loreMatch) {
+        public CustomSlot(boolean enabled, String form, String type, int position, String slotType, String loreMatch, String permission) {
             this.enabled = enabled;
             this.form = form;
             this.type = type;
             this.position = position;
             this.slotType = slotType;
             this.loreMatch = loreMatch;
+            this.permission = permission == null ? "" : permission;
         }
 
         public boolean isEnabled() {
-            return enabled;
+            return this.enabled;
         }
 
         public String getForm() {
-            return form;
+            return this.form;
         }
 
         public String getType() {
-            return type;
+            return this.type;
         }
 
         public int getPosition() {
-            return position;
+            return this.position;
         }
 
         public String getSlotType() {
-            return slotType;
+            return this.slotType;
         }
 
         public String getLoreMatch() {
-            return loreMatch;
+            return this.loreMatch;
+        }
+
+        public String getPermission() {
+            return this.permission;
         }
     }
+}
 
-    public boolean isOverrideEKey() {
-        return overrideEKey;
-    }
-
-    public void setOverrideEKey(boolean overrideEKey) {
-        this.overrideEKey = overrideEKey;
-        config.set("general.override-e-key", overrideEKey);
-        saveConfig();
-    }
-} 

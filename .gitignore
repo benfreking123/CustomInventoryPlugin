@@ -1,0 +1,10 @@
+# Maven build output
+target/
+
+# Local Fabled jar dep (copied from shared/plugins/jars/ at build time)
+lib/
+
+# IDE
+.idea/
+*.iml
+.vscode/

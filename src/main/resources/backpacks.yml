@@ -1,0 +1,63 @@
+# ─── CustomInventoryPlugin: Backpack definitions ────────────────────────────
+#
+# Each entry is one backpack. The map key is the backpack id used with
+# /bp <id>. Storage is cross-server (one MariaDB row per slot, keyed by
+# player UUID + backpack id), so a player sees the same contents whether
+# they open it on social, zone1, dungeon, or dev.
+#
+# Fields:
+#   display-name   Title shown on the inventory window. Color codes (&7) OK.
+#   size           Slot count. Must be a multiple of 9 in [9, 54].
+#                  9 / 18 / 27 / 36 / 45 / 54.
+#   permission     LuckPerms node required to access. Leave empty ("") to
+#                  make the backpack free for every player.
+#   ci-slot        Slot position (0-53) inside /ci to render a button that
+#                  opens this backpack. Use -1 for command-only (no button).
+#   ci-icon        Material name for the button icon. Ignored when ci-slot
+#                  is -1. Defaults to CHEST.
+#   smart-pickup   Legacy. If true (and default-mode is unset) the bag's
+#                  default pickup mode becomes MATCH. Prefer default-mode.
+#
+# Auto-pickup (v1.5.0):
+#   default-mode   Default per-player pickup mode for this bag until they
+#                  change it via the control bar. One of:
+#                    OFF       never auto-collects
+#                    MATCH     only top up stacks already in the bag
+#                    OVERFLOW  inventory fills first, bag catches the rest
+#                    BAG_FIRST bag fills first, then inventory
+#                  The bag declaration order here is the multi-bag priority
+#                  (top wins). Master toggles live in /bp, not per bag.
+#   filterable     If true, players get a Filter button to restrict what
+#                  this bag vacuums (an allow-list of materials).
+#   default-filter List of material names seeding the allow-list (empty = all).
+#
+# Capacity tiers (v1.5.0):
+#   size           Base window size at tier 0. Multiple of 9 in [9, 54].
+#                  Bags >= 18 reserve the bottom row as a control bar, so
+#                  usable storage is (size - 9). Bags of 9 have no control bar.
+#   max-size       Window size cap once fully upgraded (>= size, <= 54).
+#   tier-step      Slots gained per tier (multiple of 9; default 9).
+#   upgrade-cost   Base Vault cost; tier N costs upgrade-cost * N. Upgrades
+#                  also require the custominventory.backpack.upgrade permission.
+#
+# Forbidden content (always, regardless of config):
+#   • Shulker boxes (any color) and bundles
+#   • Other backpack items (PDC-tagged)
+#
+# ────────────────────────────────────────────────────────────────────────────
+
+backpacks:
+
+  # Free starter pouch every player can use. 27-slot window (18 usable + bar).
+  pouch:
+    display-name: "&7Adventurer's Pouch"
+    size: 27
+    max-size: 27
+    tier-step: 9
+    permission: ""
+    ci-slot: -1
+    ci-icon: CHEST
+    default-mode: OFF
+    filterable: true
+    default-filter: []
+    upgrade-cost: 0

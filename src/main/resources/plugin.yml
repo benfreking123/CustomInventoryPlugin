@@ -1,28 +1,58 @@
 name: CustomInventoryPlugin
-version: '${project.version}'
+version: '1.5.0'
 main: com.example.custominventoryplugin.CustomInventoryPlugin
 api-version: '1.21'
-description: A custom inventory plugin for Paper 1.21.4
-authors: [YourName]
+description: Bespoke Gear Menu + cross-server backpacks (LuckPerms-gated, MariaDB-backed).
+authors: [TheTower]
 depend: [Fabled]
+# Divinity is soft-depended so CustomInventoryPlugin enables AFTER it: this
+# makes our HIGHEST EntityDeathEvent handler run after Divinity's DropManager
+# (HIGHEST) but before its LootManager (MONITOR) loot-box wrapping. Vault is
+# optional and only used for capacity-tier purchases.
+softdepend: [LuckPerms, PlaceholderAPI, Divinity, Vault]
+load: POSTWORLD
+
 commands:
   addstrength:
-    description: Adds 5 to your Strength attribute
+    description: Adds 5 to your Strength attribute (debug helper)
     usage: /<command>
     permission: custominventory.addstrength
   ci:
-    description: Custom Inventory commands
+    description: Custom Inventory commands — opens the Gear Menu
     usage: /<command> [reload]
     permission: custominventory.use
+  bp:
+    description: Open one of your backpacks. /bp lists what you can open.
+    usage: /<command> [id|reload]
+    permission: custominventory.backpack
   debug:
     description: Debug commands for CustomInventory
     usage: /<command> [toggle|reload|form|type]
     permission: custominventory.debug
+  groupdrop:
+    description: Choose-your-reward group drops (open / edit / tokens)
+    usage: /<command> [id|list|create|edit|delete|set|option|token|reset|export|import|reload]
+    permission: custominventory.groupdrop.use
 
 permissions:
   custominventory.use:
     description: Allows use of the custom inventory commands
     default: true
+  custominventory.backpack:
+    description: Allows use of the /bp command (per-backpack access still gated by its own perm)
+    default: true
   custominventory.debug:
     description: Allows use of debug commands
-    default: op 
+    default: op
+  custominventory.groupdrop.use:
+    description: Allows opening group-drop reward selections
+    default: true
+  custominventory.groupdrop.admin:
+    description: Allows creating/editing/deleting group drops and minting tokens
+    default: op
+  custominventory.backpack.upgrade:
+    description: Allows purchasing backpack capacity-tier upgrades (also costs money)
+    default: false
+  custominventory.backpack.autopickup:
+    description: Allows using the backpack auto-pickup pipeline (master toggles in /bp)
+    default: true

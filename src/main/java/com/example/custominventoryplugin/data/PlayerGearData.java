@@ -2,445 +2,353 @@ package com.example.custominventoryplugin.data;
 
 import com.example.custominventoryplugin.CustomInventoryPlugin;
 import com.example.custominventoryplugin.config.ConfigManager;
-import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
-import org.bukkit.scheduler.BukkitRunnable;
 
-import java.io.File;
-import java.io.IOException;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.Base64;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Level;
-import java.util.Set;
-import java.util.HashSet;
-import java.util.Base64;
-import java.util.zip.Deflater;
-import java.util.zip.Inflater;
-import java.io.ByteArrayOutputStream;
-import java.io.ByteArrayInputStream;
 
+/**
+ * Player gear/attribute store, backed by MariaDB through {@link Database}.
+ *
+ * Public API is identical to the v1.0 YAML-backed implementation so existing
+ * callers (ArmorHandler, AttributeHandler, GearInventory) need no changes.
+ *
+ * Per-(uuid, slot) state lives in three tables:
+ *   cip_player_gear        — equipped ItemStack
+ *   cip_player_slot_attrs  — Fabled attribute deltas (slot → {attr → value})
+ *   cip_player_slot_perms  — slot → permission node (for skill gem revoke)
+ *
+ * In-memory caches are populated on PlayerJoinEvent and write-through on
+ * every mutation. Permissions themselves persist via LuckPerms (cross-server);
+ * cip_player_slot_perms only tracks WHICH slot granted what so we can revoke.
+ */
 public class PlayerGearData {
+
     private static final Map<UUID, Map<String, ItemStack>> playerGear = new HashMap<>();
-    public static final Map<UUID, Map<String, Map<String, Integer>>> playerSlotAttributes = new HashMap<>();
-    private static final Map<UUID, Set<String>> playerPermissions = new HashMap<>();
-    private static Plugin plugin;
-    private static File playerDataFolder;
-    private static final int AUTO_SAVE_INTERVAL = 300; // 5 minutes in seconds
-    private static final Map<UUID, Long> lastSaveTime = new HashMap<>();
-    private static ConfigManager configManager;
+    public  static final Map<UUID, Map<String, Map<String, Integer>>> playerSlotAttributes = new HashMap<>();
+    private static final Map<UUID, Map<String, String>> playerSlotPerms = new HashMap<>();
     private static final Set<UUID> loadedPlayers = new HashSet<>();
 
-    public static void initialize(Plugin plugin) {
-        if (plugin == null) {
-            throw new IllegalArgumentException("Plugin cannot be null");
-        }
+    private static Plugin plugin;
+    private static ConfigManager configManager;
+    private static Database database;
+
+    public static void initialize(Plugin plugin, Database database) {
+        if (plugin == null) throw new IllegalArgumentException("Plugin cannot be null");
+        if (database == null) throw new IllegalArgumentException("Database cannot be null");
         PlayerGearData.plugin = plugin;
-        configManager = ((CustomInventoryPlugin) plugin).getConfigManager();
-        playerDataFolder = new File(plugin.getDataFolder(), "playerData");
-        if (!playerDataFolder.exists()) {
-            playerDataFolder.mkdirs();
-        }
-        
-        // Start auto-save task
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                autoSave();
-            }
-        }.runTaskTimer(plugin, AUTO_SAVE_INTERVAL * 20L, AUTO_SAVE_INTERVAL * 20L);
+        PlayerGearData.database = database;
+        PlayerGearData.configManager = ((CustomInventoryPlugin) plugin).getConfigManager();
     }
 
-    public static void loadPlayerData(UUID playerUUID) {
-        if (playerUUID == null) {
-            logWarning("Attempted to load data for null player UUID");
-            return;
-        }
+    // ─────────────────────────────────────────────────────────────────────────
+    // Player session lifecycle
+    // ─────────────────────────────────────────────────────────────────────────
 
-        if (loadedPlayers.contains(playerUUID)) {
-            return; // Already loaded
-        }
+    public static void loadPlayerData(UUID uuid) {
+        if (uuid == null) return;
+        if (loadedPlayers.contains(uuid)) return;
 
-        File playerFile = getPlayerFile(playerUUID);
-        if (!playerFile.exists()) {
-            loadedPlayers.add(playerUUID); // Mark as loaded even if no file exists
-            return;
-        }
-
-        try {
-            FileConfiguration config = YamlConfiguration.loadConfiguration(playerFile);
-
-            // Load gear data with decompression
-            if (config.contains("gear")) {
-                Map<String, ItemStack> gear = new HashMap<>();
-                for (String key : config.getConfigurationSection("gear").getKeys(false)) {
-                    String compressed = config.getString("gear." + key);
-                    ItemStack item = decompressItemStack(compressed);
-                    if (item != null) {
-                        gear.put(key, item);
+        try (Connection c = database.getConnection()) {
+            // Gear
+            try (PreparedStatement ps = c.prepareStatement(
+                    "SELECT slot_id, item_data FROM cip_player_gear WHERE player_uuid=?")) {
+                ps.setString(1, uuid.toString());
+                try (ResultSet rs = ps.executeQuery()) {
+                    Map<String, ItemStack> gear = new HashMap<>();
+                    while (rs.next()) {
+                        ItemStack stack = decodeItem(rs.getString("item_data"));
+                        if (stack != null) gear.put(rs.getString("slot_id"), stack);
                     }
-                }
-                if (!gear.isEmpty()) {
-                    playerGear.put(playerUUID, gear);
+                    if (!gear.isEmpty()) playerGear.put(uuid, gear);
                 }
             }
 
-            // Load slot attributes
-            if (config.contains("attributes")) {
-                Map<String, Map<String, Integer>> attributes = new HashMap<>();
-                for (String key : config.getConfigurationSection("attributes").getKeys(false)) {
-                    Map<String, Integer> slotAttrs = new HashMap<>();
-                    for (String attrKey : config.getConfigurationSection("attributes." + key).getKeys(false)) {
-                        slotAttrs.put(attrKey, config.getInt("attributes." + key + "." + attrKey));
+            // Slot attribute deltas
+            try (PreparedStatement ps = c.prepareStatement(
+                    "SELECT slot_id, attr_name, attr_value FROM cip_player_slot_attrs WHERE player_uuid=?")) {
+                ps.setString(1, uuid.toString());
+                try (ResultSet rs = ps.executeQuery()) {
+                    Map<String, Map<String, Integer>> attrs = new HashMap<>();
+                    while (rs.next()) {
+                        attrs.computeIfAbsent(rs.getString("slot_id"), k -> new HashMap<>())
+                             .put(rs.getString("attr_name"), rs.getInt("attr_value"));
                     }
-                    attributes.put(key, slotAttrs);
-                }
-                if (!attributes.isEmpty()) {
-                    playerSlotAttributes.put(playerUUID, attributes);
+                    if (!attrs.isEmpty()) playerSlotAttributes.put(uuid, attrs);
                 }
             }
 
-            // Load permissions
-            if (config.contains("permissions")) {
-                Set<String> permissions = new HashSet<>(config.getStringList("permissions"));
-                if (!permissions.isEmpty()) {
-                    playerPermissions.put(playerUUID, permissions);
+            // Slot → permission map
+            try (PreparedStatement ps = c.prepareStatement(
+                    "SELECT slot_id, permission FROM cip_player_slot_perms WHERE player_uuid=?")) {
+                ps.setString(1, uuid.toString());
+                try (ResultSet rs = ps.executeQuery()) {
+                    Map<String, String> perms = new HashMap<>();
+                    while (rs.next()) perms.put(rs.getString("slot_id"), rs.getString("permission"));
+                    if (!perms.isEmpty()) playerSlotPerms.put(uuid, perms);
                 }
             }
 
-            loadedPlayers.add(playerUUID);
-            lastSaveTime.put(playerUUID, System.currentTimeMillis());
-            logDebug("Loaded data for player: " + playerUUID);
-        } catch (Exception e) {
-            logWarning("Failed to load data for player: " + playerUUID, e);
+            loadedPlayers.add(uuid);
+            logDebug("Loaded data for " + uuid);
+        } catch (SQLException e) {
+            logWarning("Failed to load gear data for " + uuid, e);
         }
     }
 
-    public static void unloadPlayerData(UUID playerUUID) {
-        if (playerUUID == null) {
-            logWarning("Attempted to unload data for null player UUID");
+    public static void unloadPlayerData(UUID uuid) {
+        if (uuid == null || !loadedPlayers.contains(uuid)) return;
+        playerGear.remove(uuid);
+        playerSlotAttributes.remove(uuid);
+        playerSlotPerms.remove(uuid);
+        loadedPlayers.remove(uuid);
+        logDebug("Unloaded data for " + uuid);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Gear (ItemStack per slot)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static void setPlayerGear(UUID uuid, String slotId, ItemStack item) {
+        if (uuid == null) return;
+        if (!loadedPlayers.contains(uuid)) loadPlayerData(uuid);
+
+        playerGear.computeIfAbsent(uuid, k -> new HashMap<>()).put(slotId, item);
+
+        String encoded = encodeItem(item);
+        if (encoded == null) {
+            removePlayerGear(uuid, slotId);
             return;
         }
-
-        if (!loadedPlayers.contains(playerUUID)) {
-            return; // Not loaded
-        }
-
-        // Save data before unloading
-        savePlayerData(playerUUID);
-
-        // Remove from memory
-        playerGear.remove(playerUUID);
-        playerSlotAttributes.remove(playerUUID);
-        playerPermissions.remove(playerUUID);
-        lastSaveTime.remove(playerUUID);
-        loadedPlayers.remove(playerUUID);
-
-        logDebug("Unloaded data for player: " + playerUUID);
-    }
-
-    public static void setPlayerGear(UUID playerUUID, String slotId, ItemStack item) {
-        if (playerUUID == null) {
-            logWarning("Attempted to set gear for null player UUID");
-            return;
-        }
-
-        // Ensure player data is loaded
-        if (!loadedPlayers.contains(playerUUID)) {
-            loadPlayerData(playerUUID);
-        }
-
-        logDebug("Setting gear for player " + playerUUID + " in slot " + slotId + 
-            ": " + (item != null ? item.getType() : "null"));
-        
-        playerGear.computeIfAbsent(playerUUID, k -> new HashMap<>()).put(slotId, item);
-        savePlayerData(playerUUID);
-    }
-
-    public static ItemStack getPlayerGear(UUID playerUUID, String slotId) {
-        if (playerUUID == null) {
-            logWarning("Attempted to get gear for null player UUID");
-            return null;
-        }
-
-        // Ensure player data is loaded
-        if (!loadedPlayers.contains(playerUUID)) {
-            loadPlayerData(playerUUID);
-        }
-
-        Map<String, ItemStack> playerSlots = playerGear.get(playerUUID);
-        ItemStack item = playerSlots != null ? playerSlots.get(slotId) : null;
-        logDebug("Getting gear for player " + playerUUID + " in slot " + slotId + 
-            ": " + (item != null ? item.getType() : "null"));
-        return item;
-    }
-
-    private static void autoSave() {
-        if (plugin == null || !plugin.isEnabled()) return;
-        
-        long currentTime = System.currentTimeMillis();
-        for (UUID playerUUID : playerGear.keySet()) {
-            Long lastSave = lastSaveTime.get(playerUUID);
-            if (lastSave == null || (currentTime - lastSave) > (AUTO_SAVE_INTERVAL * 1000L)) {
-                savePlayerData(playerUUID);
-                lastSaveTime.put(playerUUID, currentTime);
-            }
+        try (Connection c = database.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "INSERT INTO cip_player_gear (player_uuid, slot_id, item_data) VALUES (?,?,?) " +
+                     "ON DUPLICATE KEY UPDATE item_data=VALUES(item_data)")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, slotId);
+            ps.setString(3, encoded);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            logWarning("setPlayerGear failed for " + uuid + ":" + slotId, e);
         }
     }
 
-    private static File getPlayerFile(UUID playerUUID) {
-        if (playerUUID == null) {
-            throw new IllegalArgumentException("Player UUID cannot be null");
-        }
-        return new File(playerDataFolder, playerUUID.toString() + ".yml");
+    public static ItemStack getPlayerGear(UUID uuid, String slotId) {
+        if (uuid == null) return null;
+        if (!loadedPlayers.contains(uuid)) loadPlayerData(uuid);
+        Map<String, ItemStack> slots = playerGear.get(uuid);
+        return slots != null ? slots.get(slotId) : null;
     }
 
-    private static File getBackupFile(UUID playerUUID) {
-        if (playerUUID == null) {
-            throw new IllegalArgumentException("Player UUID cannot be null");
+    public static void removePlayerGear(UUID uuid, String slotId) {
+        if (uuid == null) return;
+        Map<String, ItemStack> slots = playerGear.get(uuid);
+        if (slots != null) {
+            slots.remove(slotId);
+            if (slots.isEmpty()) playerGear.remove(uuid);
         }
-        return new File(playerDataFolder, playerUUID.toString() + ".backup.yml");
-    }
-
-    private static String compressItemStack(ItemStack item) {
-        if (item == null) return null;
-        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            Deflater deflater = new Deflater(Deflater.BEST_COMPRESSION);
-            byte[] data = item.serializeAsBytes();
-            deflater.setInput(data);
-            deflater.finish();
-            
-            byte[] buffer = new byte[1024];
-            while (!deflater.finished()) {
-                int count = deflater.deflate(buffer);
-                baos.write(buffer, 0, count);
-            }
-            deflater.end();
-            
-            return Base64.getEncoder().encodeToString(baos.toByteArray());
-        } catch (Exception e) {
-            logWarning("Failed to compress item stack", e);
-            return null;
+        try (Connection c = database.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "DELETE FROM cip_player_gear WHERE player_uuid=? AND slot_id=?")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, slotId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            logWarning("removePlayerGear failed for " + uuid + ":" + slotId, e);
         }
     }
 
-    private static ItemStack decompressItemStack(String compressed) {
-        if (compressed == null) return null;
-        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            byte[] data = Base64.getDecoder().decode(compressed);
-            Inflater inflater = new Inflater();
-            inflater.setInput(data);
-            
-            byte[] buffer = new byte[1024];
-            while (!inflater.finished()) {
-                int count = inflater.inflate(buffer);
-                baos.write(buffer, 0, count);
-            }
-            inflater.end();
-            
-            return ItemStack.deserializeBytes(baos.toByteArray());
-        } catch (Exception e) {
-            logWarning("Failed to decompress item stack", e);
-            return null;
-        }
-    }
-
-    private static void savePlayerData(UUID playerUUID) {
-        if (playerUUID == null) {
-            logWarning("Attempted to save data for null player UUID");
-            return;
-        }
-
-        File playerFile = getPlayerFile(playerUUID);
-        File backupFile = getBackupFile(playerUUID);
-        
-        // Create backup of existing file
-        if (playerFile.exists()) {
-            try {
-                if (backupFile.exists()) {
-                    backupFile.delete();
-                }
-                playerFile.renameTo(backupFile);
-            } catch (Exception e) {
-                logWarning("Failed to create backup for " + playerUUID, e);
-            }
-        }
-
-        FileConfiguration config = new YamlConfiguration();
-
-        // Save gear data with compression
-        Map<String, ItemStack> gear = playerGear.get(playerUUID);
-        if (gear != null) {
-            for (Map.Entry<String, ItemStack> entry : gear.entrySet()) {
-                String compressed = compressItemStack(entry.getValue());
-                if (compressed != null) {
-                    config.set("gear." + entry.getKey(), compressed);
+    public static void clearPlayerData(UUID uuid) {
+        if (uuid == null) return;
+        playerGear.remove(uuid);
+        playerSlotAttributes.remove(uuid);
+        playerSlotPerms.remove(uuid);
+        try (Connection c = database.getConnection()) {
+            for (String table : new String[]{"cip_player_gear", "cip_player_slot_attrs", "cip_player_slot_perms"}) {
+                try (PreparedStatement ps = c.prepareStatement("DELETE FROM " + table + " WHERE player_uuid=?")) {
+                    ps.setString(1, uuid.toString());
+                    ps.executeUpdate();
                 }
             }
+        } catch (SQLException e) {
+            logWarning("clearPlayerData failed for " + uuid, e);
         }
+    }
 
-        // Save slot attributes
-        Map<String, Map<String, Integer>> attributes = playerSlotAttributes.get(playerUUID);
-        if (attributes != null) {
-            for (Map.Entry<String, Map<String, Integer>> entry : attributes.entrySet()) {
-                config.set("attributes." + entry.getKey(), entry.getValue());
+    // ─────────────────────────────────────────────────────────────────────────
+    // Slot attribute deltas (Fabled bookkeeping)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static void setPlayerSlotAttributes(UUID uuid, String slotId, Map<String, Integer> attrs) {
+        if (uuid == null || attrs == null) return;
+        playerSlotAttributes.computeIfAbsent(uuid, k -> new HashMap<>())
+                            .put(slotId, new HashMap<>(attrs));
+        try (Connection c = database.getConnection()) {
+            try (PreparedStatement del = c.prepareStatement(
+                    "DELETE FROM cip_player_slot_attrs WHERE player_uuid=? AND slot_id=?")) {
+                del.setString(1, uuid.toString()); del.setString(2, slotId);
+                del.executeUpdate();
             }
-        }
-
-        // Save permissions
-        Set<String> permissions = playerPermissions.get(playerUUID);
-        if (permissions != null) {
-            config.set("permissions", new HashSet<>(permissions));
-        }
-
-        try {
-            config.save(playerFile);
-            lastSaveTime.put(playerUUID, System.currentTimeMillis());
-            
-            // Clean up backup if save was successful
-            if (backupFile.exists()) {
-                backupFile.delete();
-            }
-        } catch (IOException e) {
-            logSevere("Could not save player data for " + playerUUID, e);
-            
-            // Restore from backup if save failed
-            if (backupFile.exists()) {
-                try {
-                    if (playerFile.exists()) {
-                        playerFile.delete();
-                    }
-                    backupFile.renameTo(playerFile);
-                } catch (Exception ex) {
-                    logSevere("Failed to restore backup for " + playerUUID, ex);
+            try (PreparedStatement ins = c.prepareStatement(
+                    "INSERT INTO cip_player_slot_attrs (player_uuid, slot_id, attr_name, attr_value) VALUES (?,?,?,?)")) {
+                for (Map.Entry<String, Integer> e : attrs.entrySet()) {
+                    ins.setString(1, uuid.toString());
+                    ins.setString(2, slotId);
+                    ins.setString(3, e.getKey());
+                    ins.setInt(4, e.getValue());
+                    ins.addBatch();
                 }
+                ins.executeBatch();
             }
+        } catch (SQLException e) {
+            logWarning("setPlayerSlotAttributes failed for " + uuid + ":" + slotId, e);
         }
     }
 
-    private static void logDebug(String message) {
-        if (plugin != null && plugin.getLogger() != null && configManager != null && configManager.isDebugEnabled()) {
-            plugin.getLogger().info("[DEBUG] " + message);
-        }
-    }
-
-    private static void logWarning(String message) {
-        if (plugin != null && plugin.getLogger() != null) {
-            plugin.getLogger().warning(message);
-        }
-    }
-
-    private static void logWarning(String message, Throwable e) {
-        if (plugin != null && plugin.getLogger() != null) {
-            plugin.getLogger().log(Level.WARNING, message, e);
-        }
-    }
-
-    private static void logSevere(String message, Throwable e) {
-        if (plugin != null && plugin.getLogger() != null) {
-            plugin.getLogger().log(Level.SEVERE, message, e);
-        }
-    }
-
-    public static void removePlayerGear(UUID playerUUID, String slotId) {
-        if (plugin != null && plugin.getLogger() != null) {
-            plugin.getLogger().info("[DEBUG] Removing gear for player " + playerUUID + " in slot " + slotId);
-        }
-        Map<String, ItemStack> playerSlots = playerGear.get(playerUUID);
-        if (playerSlots != null) {
-            playerSlots.remove(slotId);
-            if (playerSlots.isEmpty()) {
-                playerGear.remove(playerUUID);
-            }
-            savePlayerData(playerUUID);
-        }
-    }
-
-    public static void clearPlayerData(UUID playerUUID) {
-        playerGear.remove(playerUUID);
-        playerSlotAttributes.remove(playerUUID);
-        playerPermissions.remove(playerUUID);
-        File playerFile = getPlayerFile(playerUUID);
-        if (playerFile.exists()) {
-            playerFile.delete();
-        }
-    }
-
-    // Legacy methods for backward compatibility
-    @Deprecated
-    public static void setPlayerRing(UUID playerUUID, ItemStack ring) {
-        setPlayerGear(playerUUID, "ring", ring);
-    }
-
-    @Deprecated
-    public static ItemStack getPlayerRing(UUID playerUUID) {
-        return getPlayerGear(playerUUID, "ring");
-    }
-
-    @Deprecated
-    public static void removePlayerRing(UUID playerUUID) {
-        removePlayerGear(playerUUID, "ring");
-    }
-
-    public static void setPlayerSlotAttributes(UUID playerUUID, String slotId, Map<String, Integer> attributes) {
-        if (plugin != null && plugin.getLogger() != null) {
-            plugin.getLogger().info("[DEBUG] Setting attributes for player " + playerUUID + " in slot " + slotId + 
-                ": " + attributes);
-        }
-        playerSlotAttributes
-            .computeIfAbsent(playerUUID, k -> new HashMap<>())
-            .put(slotId, new HashMap<>(attributes));
-        savePlayerData(playerUUID);
-    }
-
-    public static Map<String, Integer> getPlayerSlotAttributes(UUID playerUUID, String slotId) {
-        Map<String, Map<String, Integer>> slotMap = playerSlotAttributes.get(playerUUID);
+    public static Map<String, Integer> getPlayerSlotAttributes(UUID uuid, String slotId) {
+        Map<String, Map<String, Integer>> slotMap = playerSlotAttributes.get(uuid);
         return slotMap != null ? slotMap.getOrDefault(slotId, new HashMap<>()) : new HashMap<>();
     }
 
-    public static void removePlayerSlotAttributes(UUID playerUUID, String slotId) {
-        if (plugin != null && plugin.getLogger() != null) {
-            plugin.getLogger().info("[DEBUG] Removing attributes for player " + playerUUID + " in slot " + slotId);
-        }
-        Map<String, Map<String, Integer>> slotMap = playerSlotAttributes.get(playerUUID);
+    public static void removePlayerSlotAttributes(UUID uuid, String slotId) {
+        if (uuid == null) return;
+        Map<String, Map<String, Integer>> slotMap = playerSlotAttributes.get(uuid);
         if (slotMap != null) {
             slotMap.remove(slotId);
-            if (slotMap.isEmpty()) {
-                playerSlotAttributes.remove(playerUUID);
-            }
-            savePlayerData(playerUUID);
+            if (slotMap.isEmpty()) playerSlotAttributes.remove(uuid);
+        }
+        try (Connection c = database.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "DELETE FROM cip_player_slot_attrs WHERE player_uuid=? AND slot_id=?")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, slotId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            logWarning("removePlayerSlotAttributes failed for " + uuid + ":" + slotId, e);
         }
     }
 
-    public static void clearPlayerSlotAttributes(UUID playerUUID) {
-        playerSlotAttributes.remove(playerUUID);
-        savePlayerData(playerUUID);
-    }
-
-    public static void addPlayerPermission(UUID playerUUID, String permission) {
-        playerPermissions.computeIfAbsent(playerUUID, k -> new HashSet<>()).add(permission);
-        savePlayerData(playerUUID);
-    }
-
-    public static void removePlayerPermission(UUID playerUUID, String permission) {
-        Set<String> permissions = playerPermissions.get(playerUUID);
-        if (permissions != null) {
-            permissions.remove(permission);
-            if (permissions.isEmpty()) {
-                playerPermissions.remove(playerUUID);
-            }
-            savePlayerData(playerUUID);
+    public static void clearPlayerSlotAttributes(UUID uuid) {
+        if (uuid == null) return;
+        playerSlotAttributes.remove(uuid);
+        try (Connection c = database.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "DELETE FROM cip_player_slot_attrs WHERE player_uuid=?")) {
+            ps.setString(1, uuid.toString());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            logWarning("clearPlayerSlotAttributes failed for " + uuid, e);
         }
     }
 
-    public static Set<String> getPlayerPermissions(UUID playerUUID) {
-        return playerPermissions.getOrDefault(playerUUID, new HashSet<>());
+    // ─────────────────────────────────────────────────────────────────────────
+    // Slot → permission tracking (used by SkillHandler with LuckPerms)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static void setSlotPermission(UUID uuid, String slotId, String permission) {
+        if (uuid == null || permission == null) return;
+        playerSlotPerms.computeIfAbsent(uuid, k -> new HashMap<>()).put(slotId, permission);
+        try (Connection c = database.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "INSERT INTO cip_player_slot_perms (player_uuid, slot_id, permission) VALUES (?,?,?) " +
+                     "ON DUPLICATE KEY UPDATE permission=VALUES(permission)")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, slotId);
+            ps.setString(3, permission);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            logWarning("setSlotPermission failed for " + uuid + ":" + slotId, e);
+        }
     }
 
-    public static void clearPlayerPermissions(UUID playerUUID) {
-        playerPermissions.remove(playerUUID);
-        savePlayerData(playerUUID);
+    public static String getSlotPermission(UUID uuid, String slotId) {
+        Map<String, String> map = playerSlotPerms.get(uuid);
+        return map != null ? map.get(slotId) : null;
     }
-} 
+
+    public static void removeSlotPermission(UUID uuid, String slotId) {
+        if (uuid == null) return;
+        Map<String, String> map = playerSlotPerms.get(uuid);
+        if (map != null) {
+            map.remove(slotId);
+            if (map.isEmpty()) playerSlotPerms.remove(uuid);
+        }
+        try (Connection c = database.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "DELETE FROM cip_player_slot_perms WHERE player_uuid=? AND slot_id=?")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, slotId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            logWarning("removeSlotPermission failed for " + uuid + ":" + slotId, e);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Legacy permission-set API (used by older code paths in the JAR).
+    // No-ops now: actual permissions are tracked via cip_player_slot_perms +
+    // LuckPerms. Kept so existing callers compile/load.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static void addPlayerPermission(UUID uuid, String permission) { /* no-op */ }
+    public static void removePlayerPermission(UUID uuid, String permission) { /* no-op */ }
+    public static Set<String> getPlayerPermissions(UUID uuid) { return new HashSet<>(); }
+    public static void clearPlayerPermissions(UUID uuid) { /* no-op */ }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Deprecated single-ring helpers (kept for binary compatibility)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Deprecated public static void      setPlayerRing(UUID u, ItemStack ring) { setPlayerGear(u, "ring", ring); }
+    @Deprecated public static ItemStack getPlayerRing(UUID u)                  { return getPlayerGear(u, "ring"); }
+    @Deprecated public static void      removePlayerRing(UUID u)               { removePlayerGear(u, "ring"); }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ItemStack serialization (Bukkit/Paper NBT bytes → Base64 string)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static String encodeItem(ItemStack item) {
+        if (item == null || item.getType().isAir()) return null;
+        try {
+            byte[] bytes = item.serializeAsBytes();
+            return Base64.getEncoder().encodeToString(bytes);
+        } catch (Exception e) {
+            logWarning("encodeItem failed", e);
+            return null;
+        }
+    }
+
+    private static ItemStack decodeItem(String encoded) {
+        if (encoded == null) return null;
+        try {
+            byte[] bytes = Base64.getDecoder().decode(encoded);
+            return ItemStack.deserializeBytes(bytes);
+        } catch (Exception e) {
+            logWarning("decodeItem failed", e);
+            return null;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Logging helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static void logDebug(String msg) {
+        if (plugin != null && configManager != null && configManager.isDebugEnabled()) {
+            plugin.getLogger().info("[DEBUG] " + msg);
+        }
+    }
+    private static void logWarning(String msg, Throwable e) {
+        if (plugin != null) plugin.getLogger().log(Level.WARNING, msg, e);
+    }
+}
