@@ -1,8 +1,10 @@
 # Maven build output
 target/
 
-# Local Fabled jar dep (copied from shared/plugins/jars/ at build time)
-lib/
+# Local lib jars. Fabled is a system-scoped compile dep (see pom.xml), so it
+# MUST be tracked for CI to build; ignore everything else in lib/.
+lib/*
+!lib/fabled.jar
 
 # IDE
 .idea/
