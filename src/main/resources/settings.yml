@@ -10,6 +10,46 @@ general:
   # Pane shown in a skill-gem slot the player hasn't unlocked yet.
   locked-pane: RED_STAINED_GLASS_PANE
 
+# AutoPick: mob/harvest drops flash on the ground (owner-locked) before vacuum.
+autopickup:
+  ground-delay-ticks: 15
+
+# AutoLoot — CIP is the server's authoritative drop manager (Divinity's `loot`
+# module is disabled). force-all makes auto-pickup always-on for everyone
+# (ignoring the per-player toggle + the autopickup permission); hide-toggle
+# hides the now-redundant "Pickup On/Off" button in /bp. Effects give ground
+# loot a rarity glow during the pop-out window; mythic/legendary also burst.
+autoloot:
+  force-all: true
+  hide-toggle: true
+  # How long mob loot stays visible on the ground (glowing) before it flies to
+  # the player. Mining/fishing keep the snappier autopickup.ground-delay-ticks.
+  ground-linger-ticks: 40
+  blacklist:
+    spawn-reasons: [SPAWNER]
+    entity-types: [ARMOR_STAND]
+  effects:
+    enabled: true
+    # Rarity-glow every ground item, not just AutoLoot pop-outs.
+    all-ground-items: true
+    burst-tiers: [mythic, legendary]
+    tiers:
+      common:    { glow: GRAY,         color: '#AAAAAA' }
+      uncommon:  { glow: GREEN,        color: '#55FF55' }
+      rare:      { glow: YELLOW,       color: '#FFFF55' }
+      mythic:    { glow: LIGHT_PURPLE, color: '#FF55FF' }
+      legendary: { glow: RED,          color: '#FF5555' }
+      tool:      { glow: GOLD,         color: '#FFAA00' }
+      currency:  { glow: YELLOW,       color: '#FFD966' }
+      resource:  { glow: AQUA,         color: '#55FFFF' }
+    aliases:
+      default: common
+      superior: mythic
+      fabled: legendary
+      eternal: legendary
+      cursed: common
+      archieve: common
+
 # How many skill-gem slots are usable with NO permission. The first N slots of
 # each type (ordered left-to-right by position) are always open; every slot
 # beyond N is locked until the player has that slot's `permission` node below.
@@ -37,6 +77,7 @@ custom-slots:
       type: Ring
       position: 2
       lore_match: 'Type: Ring'
+      id_match: ring
       permission: ''
     '1':
       enabled: true
@@ -45,6 +86,7 @@ custom-slots:
       type: Ring
       position: 3
       lore_match: 'Type: Ring'
+      id_match: ring
       permission: ''
     '2':
       enabled: true
@@ -53,6 +95,7 @@ custom-slots:
       type: Amulet
       position: 11
       lore_match: 'Type: Bracelet'
+      id_match: bracelet
       permission: ''
     '3':
       enabled: true
@@ -61,6 +104,7 @@ custom-slots:
       type: Relic
       position: 12
       lore_match: 'Type: Relic'
+      id_match: relic
       permission: ''
     '4':
       enabled: true
@@ -69,6 +113,7 @@ custom-slots:
       type: Talisman
       position: 20
       lore_match: 'Type: Talisman'
+      id_match: talisman
       permission: ''
     '5':
       enabled: true
@@ -77,6 +122,7 @@ custom-slots:
       type: Charm
       position: 21
       lore_match: 'Type: Charm'
+      id_match: charm
       permission: ''
     # Active gem slots (positions 45-53). Default-open: first 3 (45, 46, 47).
     '6':
@@ -213,3 +259,147 @@ custom-slots:
 item-types:
   form: Type # The form text (e.g., "Type: Ring")
   type: Ring # The type text (e.g., "Type: Ring")
+
+# Tooltip frames (Docs/deisgn/tooltips.md)
+tooltip:
+  enabled: true
+  namespace: tower
+  tiers:
+    common: common
+    uncommon: uncommon
+    rare: rare
+    mythic: mythic
+    legendary: legendary
+    tool: tool
+    currency: currency
+    resource: resource
+    default: common
+    superior: mythic
+    fabled: legendary
+    eternal: legendary
+    cursed: common
+    archieve: common
+  item-ids: {}
+  materials:
+    WOODEN_HOE: tool
+    STONE_HOE: tool
+    IRON_HOE: tool
+    GOLDEN_HOE: tool
+    DIAMOND_HOE: tool
+    NETHERITE_HOE: tool
+    WOODEN_PICKAXE: tool
+    STONE_PICKAXE: tool
+    IRON_PICKAXE: tool
+    GOLDEN_PICKAXE: tool
+    DIAMOND_PICKAXE: tool
+    NETHERITE_PICKAXE: tool
+  sources:
+    smithy_chunk_of_scrap: 'Craft lootboxes · Smithy · Merchants'
+    smithy_flux_dust: 'Smithy · Mob drops'
+    smithy_purge_salt: 'Smithy · Mob drops'
+    smithy_core_flux: 'Smithy · Mob drops'
+    smithy_chaos_shard: 'Smithy · Mob drops'
+    smithy_ember: 'Smithy · Mob drops'
+    smithy_lock_seal: 'Smithy · Mob drops'
+    smithy_target_lock_seal: 'Smithy · Mob drops'
+    smithy_targeting_prism: 'Smithy · Mob drops'
+    dungeonkey_floor3: 'Quest reward · Floor 3'
+    charged_crystal_small: 'Crafting · Quest rewards'
+    charged_crystal_medium: 'Crafting · Quest rewards'
+    charged_crystal_large: 'Crafting · Quest rewards'
+    charged_crystal_full: 'Crafting · Quest rewards'
+  # Derived attribute requirements (CIP feature; Divinity has no native support).
+  # Set once per qualifying item and stored in PDC. The ATTRIBUTE is chosen from
+  # the item's dominant rolled Fabled stat (see stat-attribute-map); the VALUE is
+  # derived, not random:
+  #   value = round(scale.base + scale.per-level * itemLevel) * tier-multiplier,
+  #   clamped to [min, max].
+  # Applies to Divinity items whose tier + id-type match below.
+  attr-requirements:
+    enabled: true
+    min: 1
+    max: 40
+    scale:
+      base: 0.0
+      per-level: 1.0
+      tier-multiplier:
+        common: 1.0
+        uncommon: 1.0
+        rare: 1.2
+        mythic: 1.4
+        legendary: 1.6
+    tiers: [common, uncommon]
+    types: [sword, axe, bow, wand, hammer, helmet, chestplate, leggings, boots, cloak]
+    attributes:
+      base_strength: Strength
+      base_dexterity: Dexterity
+      base_intelligence: Intelligence
+      base_vitality: Vitality
+      base_agility: Agility
+      base_wisdom: Wisdom
+    # Which governing attribute each rolled Fabled stat points to. The item's
+    # dominant mapped stat (by rolled magnitude) decides the required attribute.
+    # Any base_<attr> stat maps to itself automatically; unlisted stats ignored.
+    stat-attribute-map:
+      damage_physical: base_strength
+      damage_melee: base_strength
+      damage_attack: base_strength
+      stat_block_break: base_strength
+      stat_knockback_resist: base_strength
+      damage_projectile: base_dexterity
+      base_attack_speed: base_dexterity
+      stat_range: base_dexterity
+      stat_attack_range: base_dexterity
+      stat_crit_chance_attack: base_dexterity
+      stat_crit_damage_attack: base_dexterity
+      stat_crit_chance_projectile: base_dexterity
+      stat_crit_damage_projectile: base_dexterity
+      damage_spell: base_intelligence
+      damage_fire: base_intelligence
+      damage_ice: base_intelligence
+      damage_lightning: base_intelligence
+      damage_chaos: base_intelligence
+      damage_area: base_intelligence
+      damage_skill: base_intelligence
+      stat_mana: base_intelligence
+      stat_mana_mod: base_intelligence
+      stat_crit_chance_spell: base_intelligence
+      stat_crit_damage_spell: base_intelligence
+      block_chance: base_intelligence
+      stat_health: base_vitality
+      stat_health_mod: base_vitality
+      stat_armor: base_vitality
+      stat_armor_mod: base_vitality
+      stat_armor_toughness: base_vitality
+      stat_absorption: base_vitality
+      stat_heal_power: base_vitality
+      defense_physical: base_vitality
+      defense_fire: base_vitality
+      defense_ice: base_vitality
+      defense_lightning: base_vitality
+      defense_chaos: base_vitality
+      stat_move_speed: base_agility
+      stat_jump: base_agility
+      stat_mining_efficiency: base_agility
+      dodge_chance: base_agility
+      stat_mana_regen: base_wisdom
+      stat_mana_regen_mod: base_wisdom
+      stat_exp: base_wisdom
+      stat_luck: base_wisdom
+
+  # Skill-gem tooltip reflow: badge row [RARITY][GEM][ELEMENT] + Active/Passive
+  # tag, description, then live stats from the connected Fabled skill
+  # (Damage/Mana/Cooldown/Level). Frame follows the displayed "Tier:" rarity.
+  gems:
+    enabled: true
+    id-prefixes: [gem_, passive_]
+    # Skill types without an element pill glyph render as a colored text tag.
+    type-colors:
+      sigil: '&6'
+      energy: '&e'
+      movement: '&b'
+      melee: '&7'
+      projectile: '&6'
+      resource: '&a'
+      dynamic: '&d'
+      passive: '&d'

@@ -1,5 +1,5 @@
 name: CustomInventoryPlugin
-version: '1.5.0'
+version: '1.11.19'
 main: com.example.custominventoryplugin.CustomInventoryPlugin
 api-version: '1.21'
 description: Bespoke Gear Menu + cross-server backpacks (LuckPerms-gated, MariaDB-backed).
@@ -8,8 +8,9 @@ depend: [Fabled]
 # Divinity is soft-depended so CustomInventoryPlugin enables AFTER it: this
 # makes our HIGHEST EntityDeathEvent handler run after Divinity's DropManager
 # (HIGHEST) but before its LootManager (MONITOR) loot-box wrapping. Vault is
-# optional and only used for capacity-tier purchases.
-softdepend: [LuckPerms, PlaceholderAPI, Divinity, Vault]
+# optional and only used for capacity-tier purchases. MythicMobs enables
+# bestiary kill tracking.
+softdepend: [LuckPerms, PlaceholderAPI, Divinity, Vault, MythicMobs, ProtocolLib]
 load: POSTWORLD
 
 commands:
@@ -19,7 +20,7 @@ commands:
     permission: custominventory.addstrength
   ci:
     description: Custom Inventory commands — opens the Gear Menu
-    usage: /<command> [reload]
+    usage: /<command> [reload|reset <player> [confirm]]
     permission: custominventory.use
   bp:
     description: Open one of your backpacks. /bp lists what you can open.
@@ -33,6 +34,15 @@ commands:
     description: Choose-your-reward group drops (open / edit / tokens)
     usage: /<command> [id|list|create|edit|delete|set|option|token|reset|export|import|reload]
     permission: custominventory.groupdrop.use
+  compendium:
+    description: Open your Compendium — account/meta progression tracker
+    usage: /<command>
+    aliases: [comp]
+    permission: custominventory.compendium
+  cipcount:
+    description: Increment a compendium counter (console hook for Skript/MythicDungeons)
+    usage: /<command> <player|uuid> <key> [amount]
+    permission: custominventory.counters.admin
 
 permissions:
   custominventory.use:
@@ -56,3 +66,12 @@ permissions:
   custominventory.backpack.autopickup:
     description: Allows using the backpack auto-pickup pipeline (master toggles in /bp)
     default: true
+  custominventory.compendium:
+    description: Allows opening the Compendium progression tracker
+    default: true
+  custominventory.bestiary.reveal:
+    description: Reveals every bestiary entry and all detail tiers (kills still shown as-is)
+    default: op
+  custominventory.counters.admin:
+    description: Allows incrementing compendium counters via /cipcount (console/ops)
+    default: op

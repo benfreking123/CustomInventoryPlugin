@@ -1,9 +1,13 @@
 package com.example.custominventoryplugin.listeners;
 
+import com.example.custominventoryplugin.CustomInventoryPlugin;
 import com.example.custominventoryplugin.config.ConfigManager;
 import com.example.custominventoryplugin.data.PlayerGearData;
 import com.example.custominventoryplugin.inventory.GearInventory;
+import com.example.custominventoryplugin.tooltip.TooltipStyleService;
 import java.util.Map;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -13,9 +17,21 @@ import org.bukkit.inventory.PlayerInventory;
 
 class ArmorHandler {
     private final ConfigManager configManager;
+    private final CustomInventoryPlugin plugin;
 
-    public ArmorHandler(ConfigManager configManager) {
+    public ArmorHandler(ConfigManager configManager, CustomInventoryPlugin plugin) {
         this.configManager = configManager;
+        this.plugin = plugin;
+    }
+
+    /**
+     * @return a denial message if {@code player} can't wear {@code item} yet
+     *         (unmet Divinity/CIP attribute requirement), otherwise null.
+     */
+    private String denyReason(Player player, ItemStack item) {
+        if (plugin == null) return null;
+        TooltipStyleService service = plugin.getTooltipStyleService();
+        return service == null ? null : service.unmetAttrRequirement(item, player);
     }
 
     public boolean handleShiftClick(InventoryClickEvent event, Player player, ItemStack clickedItem) {
@@ -25,6 +41,14 @@ class ArmorHandler {
             String armorType = entry.getKey();
             int guiSlot = entry.getValue();
             if (!this.isValidArmorForSlot(clickedItem, armorType) || (slotItem = event.getInventory().getItem(guiSlot)) != null && !slotItem.getType().isAir()) continue;
+            // Gate on requirements here so we never equip-then-rip: the
+            // PlayerArmorChangeEvent enforcement would otherwise leave a
+            // grabbable copy in the mirrored GUI armor slot (dupe).
+            String deny = this.denyReason(player, clickedItem);
+            if (deny != null) {
+                player.sendMessage(Component.text(deny + " to wear this.", NamedTextColor.RED));
+                return true;
+            }
             event.getInventory().setItem(guiSlot, clickedItem.clone());
             PlayerInventory playerInv = player.getInventory();
             switch (armorType) {
@@ -104,6 +128,15 @@ class ArmorHandler {
         if (item != null && !item.getType().isAir() && !this.isValidArmorForSlot(item, armorType)) {
             event.setCancelled(true);
             return;
+        }
+        // Block placing gear the player doesn't meet the requirement for.
+        if (item != null && !item.getType().isAir()) {
+            String deny = this.denyReason(player, item);
+            if (deny != null) {
+                event.setCancelled(true);
+                player.sendMessage(Component.text(deny + " to wear this.", NamedTextColor.RED));
+                return;
+            }
         }
         PlayerInventory playerInv = player.getInventory();
         switch (armorType) {

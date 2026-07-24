@@ -31,7 +31,7 @@ implements Listener {
         this.configManager = configManager;
         this.plugin = plugin;
         this.slotHandler = new SlotHandler(configManager, plugin);
-        this.armorHandler = new ArmorHandler(configManager);
+        this.armorHandler = new ArmorHandler(configManager, plugin);
         this.skillHandler = this.slotHandler.getSkillHandler();
         this.attributeHandler = new AttributeHandler(configManager);
     }
@@ -127,10 +127,10 @@ implements Listener {
             this.armorHandler.handleNormalClick(event, player, entry.getKey());
             return;
         }
-        ItemStack itemStack = event.getCurrentItem();
-        if (itemStack != null && (itemStack.getType() == Material.BARRIER || itemStack.getType() == this.configManager.getFillPane() || itemStack.getType() == this.configManager.getLockedPane())) {
-            event.setCancelled(true);
-        }
+        // Any remaining top-inventory click is a decorative/empty frame slot
+        // (functional slots returned above). Cancel so nothing can be dropped
+        // into the now-transparent background cells.
+        event.setCancelled(true);
     }
 
     /** Close /ci, then on the next tick open the requested backpack. */

@@ -1,0 +1,344 @@
+# ============================================================
+#  compendium.yml — Compendium quest tracking
+#  -------------------------------------------
+#  Quest progress is read straight from BetonQuest's MariaDB
+#  tables (betonquest_tags) — no new tracking. Each floor lists
+#  the done-tags that count as "a quest completed". Tags are the
+#  full package-qualified form: <package>><tag>.
+#
+#  When a floor gains a quest, add its done-tag here and the
+#  Account book / My Quests tile pick it up on reload.
+# ============================================================
+
+quests:
+  floor1:
+    label: "Floor 1"
+    tags:
+      - "floor1>q1_done"
+      - "floor1>q2_done"
+      - "floor1>q3_done"
+      - "floor1>q4_done"
+      - "floor1>side_done"
+  floor2:
+    label: "Floor 2"
+    tags:
+      - "floor2>f2_q1_done"
+      - "floor2>f2_q2_done"
+      - "floor2>f2_q3_done"
+      - "floor2>f2_q4_done"
+      - "floor2>f2_q5_done"
+      - "floor2>apprentice_done"
+  floor3:
+    label: "Floor 3"
+    tags:
+      - "floor3>f3_q1_done"
+      - "floor3>f3_pond_done"
+      - "floor3>f3_walkers_done"
+      - "floor3>f3_seal1_done"
+      - "floor3>f3_seal2_done"
+      - "floor3>f3_seal3_done"
+      - "floor3>f3_scav_done"
+      - "floor3>f3_spit_done"
+      - "floor3>f3_run_done"
+      - "floor3>f3_elite_done"
+      - "floor3>f3_pump_done"
+      - "floor3>f3_dungeon_done"
+  floor4:
+    label: "Floor 4"
+    tags:
+      - "floor4>f4_wheat_done"
+      - "floor4>f4_gnome_done"
+      - "floor4>f4_haven_done"
+      - "floor4>f4_warehouse_done"
+      - "floor4>f4_channelers_done"
+      - "floor4>f4_supplies_done"
+      - "floor4>f4_rocky_done"
+      - "floor4>f4_lever_done"
+
+# ============================================================
+#  Account book — progress score + "journey" stats
+#  -----------------------------------------------
+#  The Account Progress % is a weighted blend of five pillars.
+#  Weights are relative; keeping them summed to 100 makes the %
+#  read as "points out of 100".
+# ============================================================
+progress:
+  total-floors: 100        # denominator for the Floors pillar (whole Tower)
+  misc-full-hours: 200     # playtime (h) that counts as 100% of the Misc pillar
+  weights:
+    floors: 40
+    quests: 20
+    bestiary: 15
+    collections: 15
+    misc: 10
+
+# Generic counter key-prefixes (cip_counters) summed for the journey stats.
+# These are set by Skript/MythicDungeons via /cipcount <player> <key>.
+counters:
+  crystals-prefix: "crystal."
+  dungeon-prefix: "dungeon."
+  checkpoint-prefix: "checkpoint."
+
+# LuckPerms nodes that represent story progress. Only an EXPLICIT grant
+# counts (the op fallback is deliberately ignored, so opped staff don't
+# see inflated progress). {n} is replaced with the floor number.
+permissions:
+  floor-done: "tower.floor{n}.done"
+  haven-unlocked: "tower.haven.unlocked"
+  haven-created: "tower.haven.created"
+
+# ── Camp discoveries ─────────────────────────────────────────
+#  Registered checkpoints (checkpoints.sk ids). Discovery = the
+#  cip_counters key "<checkpoint-prefix><id>" > 0, which the
+#  Skript writes on first activation — cross-server via MariaDB.
+#  Undiscovered camps render as "???" in {camps_summary}.
+camps:
+  floor2:
+    label: "Rowan's Camp"
+    floor: 2
+  floor3_1:
+    label: "Savanna Settlement"
+    floor: 3
+  floor4_1:
+    label: "Hearth Ranch"
+    floor: 4
+
+# ============================================================
+#  menu — the /compendium hub layout (custom-slots style)
+#  --------------------------------------------------------
+#  Move tiles, swap icons, retitle, re-order lore or disable a
+#  tile without a rebuild. Remove this whole block to fall back
+#  to the built-in defaults.
+#
+#  icon:   a vanilla Material (e.g. WRITABLE_BOOK), "player_head",
+#          or a Nexo item id as "nexo:<id>".
+#  action: what a click does — one of:
+#          quests | bestiary | harvest | collections | close | none
+#  name/lore support {placeholders}. A lore line that is EXACTLY a
+#  block-token expands to several computed lines.
+#
+#  Scalar placeholders:
+#    {player} {score} {playtime} {deaths} {first_joined}
+#    {quests_done} {quests_total} {camps} {camps_total} {crystals} {dungeon_runs}
+#    {bestiary_found} {bestiary_total} {floor_count} {highest} {climb_line}
+#  Block placeholders (own line):
+#    {bars}           5 progress-breakdown bars
+#    {quest_summary}  completed count + per-floor rows
+#    {floors_summary} climb summary (cleared/highest/next/zone bar)
+#    {haven_status}   personal-space status lines
+#    {camps_summary}  camp discoveries (name or ??? per camp)
+# ============================================================
+menu:
+  title: "&f\uE201\uA426"
+  rows: 6
+  filler:
+    enabled: false
+    icon: BLACK_STAINED_GLASS_PANE
+    name: " "
+  tiles:
+    player:
+      enabled: true
+      slot: 0
+      icon: player_head
+      name: "&d&l{player}"
+      action: none
+      lore:
+        - "&7Your legend, etched into the Tower."
+        - ""
+        - "&dAccount Progress: &f{score}%"
+        - "&bPlaytime: &f{playtime}"
+        - "&8Deaths: &f{deaths}"
+        - "&aFirst joined: &f{first_joined}"
+        - ""
+        - "&7Journey so far"
+        - "&aQuests done: &f{quests_done}&7/&f{quests_total}"
+        - "&6Camps found: &f{camps}&7/&f{camps_total}"
+        - "&5Crystals charged: &f{crystals}"
+        - "&cDungeon runs: &f{dungeon_runs}"
+        - ""
+        - "&7Progress breakdown"
+        - "{bars}"
+    camps:
+      enabled: true
+      slot: 11
+      icon: CAMPFIRE
+      name: "&6&lCamp Discoveries"
+      action: none
+      lore:
+        - "&7Rest sites you've kindled across"
+        - "&7the Tower — your respawn anchors."
+        - ""
+        - "&6Found: &f{camps}&7/&f{camps_total}"
+        - ""
+        - "{camps_summary}"
+    quests:
+      enabled: true
+      slot: 1
+      icon: KNOWLEDGE_BOOK
+      name: "&a&lMy Quests"
+      action: quests
+      lore:
+        - "&7Every trial, bounty and errand"
+        - "&7you've taken up across the Tower."
+        - ""
+        - "{quest_summary}"
+        - ""
+        - "&eClick &7to open your quest log."
+        - ""
+        - "&8Command: &7/myquest"
+    floors:
+      enabled: true
+      slot: 9
+      icon: LADDER
+      name: "&6&lFloors Completed"
+      action: none
+      lore:
+        - "&7How high have you climbed?"
+        - "&7Every floor is a tale survived."
+        - ""
+        - "{floors_summary}"
+    haven:
+      enabled: true
+      slot: 20
+      icon: END_PORTAL_FRAME
+      name: "&5&lYour Haven"
+      action: command
+      command: "haven"
+      command-right: "havenleave"
+      lore:
+        - "&7A private platform adrift in the"
+        - "&7quiet void between the floors —"
+        - "&7a pocket of calm all your own."
+        - ""
+        - "{haven_status}"
+        - ""
+        - "&eLeft-click &7to travel there."
+        - "&eRight-click &7to leave and return."
+        - ""
+        - "&8Command: &7/haven &8· &7/havenleave"
+    bestiary:
+      enabled: true
+      slot: 4
+      icon: SKELETON_SKULL
+      name: "&e&lBestiary"
+      action: bestiary
+      lore:
+        - "&7A record of every creature you've"
+        - "&7hunted, studied and survived."
+        - ""
+        - "&7Discovered: &f{bestiary_found}&7/&f{bestiary_total}"
+        - ""
+        - "&eClick &7to browse the Bestiary."
+    harvest:
+      enabled: true
+      slot: 6
+      icon: GOLDEN_HOE
+      name: "&a&lHarvested & Collected"
+      action: harvest
+      lore:
+        - "&7Every crop reaped and ore cracked"
+        - "&7since your very first swing."
+        - ""
+        - "&eClick &7to view your lifetime tallies."
+    collections:
+      enabled: true
+      slot: 5
+      icon: CHEST
+      name: "&e&lCollections &8(soon)"
+      action: none
+      lore:
+        - "&7Rare finds, trophies and full sets,"
+        - "&7gathered into one grand display."
+        - ""
+        - "&8Collection tracking is coming soon."
+    # ── Quick actions (folded in from the old /menu PlayerMenu) ──
+    skill-tree:
+      enabled: true
+      slot: 8
+      icon: BOOK
+      name: "&f&lSkill Tree"
+      action: command
+      command: "class skill"
+      lore:
+        - "&7Shape your destiny — unlock and"
+        - "&7rank the powers that define you."
+        - ""
+        - "&eClick &7to open your skill tree."
+        - ""
+        - "&8Command: &7/class skill"
+    attributes:
+      enabled: true
+      slot: 17
+      icon: BELL
+      name: "&f&lAttributes"
+      action: command
+      command: "class attr"
+      lore:
+        - "&7Strength, wisdom, guile and more —"
+        - "&7spend your points and grow mightier."
+        - ""
+        - "&eClick &7to spend attribute points."
+        - ""
+        - "&8Command: &7/class attr"
+    refund-skills:
+      enabled: true
+      slot: 26
+      icon: ANVIL
+      name: "&f&lRefund Skills"
+      action: command
+      command: "class refund"
+      lore:
+        - "&7Second thoughts? Reclaim your"
+        - "&7spent points and rebuild anew."
+        - ""
+        - "&eClick &7to refund your skills."
+        - ""
+        - "&8Command: &7/class refund"
+    wallet:
+      enabled: true
+      slot: 27
+      icon: GOLD_INGOT
+      name: "&6&lWallet"
+      action: command
+      command: "genesis MoneyMenu"
+      lore:
+        - "&7Every coin counted, every balance"
+        - "&7kept — your fortune at a glance."
+        - ""
+        - "&eClick &7to open your wallet."
+        - ""
+        - "&8Command: &7/genesis MoneyMenu"
+    backpacks:
+      enabled: true
+      slot: 2
+      icon: BUNDLE
+      name: "&f&lBackpacks"
+      action: command
+      command: "bp list"
+      lore:
+        - "&7Haul more loot than your pockets"
+        - "&7were ever meant to hold."
+        - ""
+        - "&7Storage bags, ore pouches and more,"
+        - "&7all kept in a single place."
+        - ""
+        - "&eClick &7to open your bags."
+        - ""
+        - "&8Command: &7/bp list"
+    quest-compass:
+      enabled: true
+      slot: 10
+      icon: RECOVERY_COMPASS
+      name: "&b&lQuest Compass"
+      action: command
+      command: "getquestcompass"
+      lore:
+        - "&7Lost your way? Let the needle"
+        - "&7guide you to your next objective."
+        - ""
+        - "&7Right-click the compass in hand"
+        - "&7to reopen your quest log."
+        - ""
+        - "&eClick &7to receive a Quest Compass."
+        - ""
+        - "&8Command: &7/getquestcompass"

@@ -21,6 +21,9 @@ import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 
 class SlotHandler {
+    private static final org.bukkit.NamespacedKey DIVINITY_ITEM_ID =
+            new org.bukkit.NamespacedKey("divinity", "item_id");
+
     private final ConfigManager configManager;
     private final CustomInventoryPlugin plugin;
     private final SkillHandler skillHandler;
@@ -194,6 +197,30 @@ class SlotHandler {
         if (meta == null) {
             return false;
         }
+        // Skill gems reflowed by the tooltip system no longer carry a
+        // "Form: Active" lore line; their original Form lives in the tt_gem
+        // PDC snapshot (version\nform\ntype\npercent\nrarity).
+        String gemForm = this.gemForm(meta);
+        if (gemForm != null) {
+            return "Form".equalsIgnoreCase(slot.getForm()) && gemForm.equalsIgnoreCase(slot.getType());
+        }
+        // Prefer matching on the Divinity item id (survives lore reflows by the
+        // tooltip system). Falls back to legacy lore matching for items without
+        // a Divinity id or slots without id_match configured.
+        String idMatch = slot.getIdMatch();
+        if (idMatch != null && !idMatch.isEmpty()) {
+            String itemId = meta.getPersistentDataContainer().get(
+                    DIVINITY_ITEM_ID, org.bukkit.persistence.PersistentDataType.STRING);
+            if (itemId != null && !itemId.isBlank()) {
+                String low = itemId.toLowerCase(java.util.Locale.ROOT);
+                for (String token : idMatch.toLowerCase(java.util.Locale.ROOT).split(",")) {
+                    if (!token.isBlank() && low.contains(token.trim())) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
         List lore = meta.getLore();
         if (lore == null) {
             return false;
@@ -206,6 +233,21 @@ class SlotHandler {
         }
         List<String> cleanLore = this.cleanLoreLines(lore);
         return this.checkLoreMatch(cleanLore, loreMatch);
+    }
+
+    /** Form ("Active"/"Passive") from the gem tooltip's PDC snapshot, or null. */
+    private String gemForm(ItemMeta meta) {
+        String raw = meta.getPersistentDataContainer().get(
+                new org.bukkit.NamespacedKey(this.plugin, "tt_gem"),
+                org.bukkit.persistence.PersistentDataType.STRING);
+        if (raw == null) {
+            return null;
+        }
+        String[] parts = raw.split("\n", -1);
+        if (parts.length < 2 || parts[1].isBlank()) {
+            return null;
+        }
+        return parts[1].trim();
     }
 
     private List<String> cleanLoreLines(List<String> lore) {

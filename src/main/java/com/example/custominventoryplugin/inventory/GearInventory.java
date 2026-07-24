@@ -23,6 +23,10 @@ public class GearInventory implements InventoryHolder {
     /** PDC key tagging /ci button icons with the target backpack id. */
     public static final String BACKPACK_BUTTON_KEY = "ci_backpack_button";
 
+    /** Nexo ci_background glyph (interface.yml, char ꐟ / U+A41F) + horizontal pull. */
+    private static final char GEAR_BG_GLYPH = '\uA41F';
+    private static final int GEAR_BG_SHIFT = 16;
+
     private final Inventory inventory;
     private final Player player;
     private final ConfigManager configManager;
@@ -37,7 +41,8 @@ public class GearInventory implements InventoryHolder {
         this.configManager = configManager;
         this.plugin = plugin;
         this.backpackButtonKey = new NamespacedKey(plugin, BACKPACK_BUTTON_KEY);
-        this.inventory = Bukkit.createInventory(this, 54, "Gear Menu");
+        this.inventory = Bukkit.createInventory(this, 54,
+                com.example.custominventoryplugin.groupdrop.Text.nexoBackground(GEAR_BG_GLYPH, GEAR_BG_SHIFT));
         this.updateInventory();
     }
 
@@ -76,24 +81,12 @@ public class GearInventory implements InventoryHolder {
             }
         }
 
-        // 3. Glass-pane fill (everything not armor/custom/backpack-button)
-        ItemStack glass = new ItemStack(this.configManager.getFillPane());
+        // 3. Decorative slots stay EMPTY so the painted ci_background frame shows
+        // through. (Clicks on these are cancelled in InventoryListener.) The old
+        // glass-pane fill would cover the art, so it's intentionally not placed.
         List<BackpackDef> backpacks = plugin.getBackpackConfig() != null
                 ? plugin.getBackpackConfig().accessible(player)
                 : List.of();
-        java.util.Set<Integer> bpButtonPositions = new java.util.HashSet<>();
-        for (BackpackDef def : backpacks) {
-            if (def.hasCiButton()) bpButtonPositions.add(def.getCiSlot());
-        }
-
-        for (int slot = 0; slot < 54; slot++) {
-            int s = slot;
-            boolean isArmorSlot = armorSlots.containsValue(s);
-            boolean isCustomSlot = customSlots.values().stream().anyMatch(c -> c.getPosition() == s);
-            boolean isBackpackSlot = bpButtonPositions.contains(s);
-            if (isArmorSlot || isCustomSlot || isBackpackSlot) continue;
-            this.inventory.setItem(s, glass);
-        }
 
         // 4. Backpack icon buttons — placed last so they override anything.
         // Use one batched query for fill counts → avoid N round-trips.

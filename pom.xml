@@ -4,7 +4,7 @@
 
     <groupId>com.example</groupId>
     <artifactId>custominventoryplugin</artifactId>
-    <version>1.5.0</version>
+    <version>1.11.19</version>
     <packaging>jar</packaging>
     <name>CustomInventoryPlugin</name>
     <description>Bespoke Gear Menu + cross-server backpacks (LuckPerms-gated, MariaDB-backed).</description>
@@ -39,6 +39,15 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- ProtocolLib (optional; only for the vanilla item-collect fly animation) - local JAR -->
+        <dependency>
+            <groupId>com.comphenix.protocol</groupId>
+            <artifactId>ProtocolLib</artifactId>
+            <version>5.4.0</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/protocollib.jar</systemPath>
+        </dependency>
+
         <!-- LuckPerms API (cross-server permission grants) -->
         <dependency>
             <groupId>net.luckperms</groupId>
@@ -62,6 +71,15 @@
             <version>1.0.4</version>
             <scope>system</scope>
             <systemPath>${project.basedir}/lib/fabled.jar</systemPath>
+        </dependency>
+
+        <!-- MythicMobs API (bestiary kill tracking) - local JAR -->
+        <dependency>
+            <groupId>io.lumine</groupId>
+            <artifactId>mythicmobs</artifactId>
+            <version>5.12.1</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/mythicmobs.jar</systemPath>
         </dependency>
 
         <!-- HikariCP — connection pooling for MariaDB -->

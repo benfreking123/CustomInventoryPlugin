@@ -1,0 +1,506 @@
+# ============================================================
+#  Bestiary — floors 1–4 (live combat roster)
+#  Sources: MythicMobs/Mobs/floor{N}/ + Divinity drops/mobs/zone1/
+#  Elite mythic ids are tracked separately but roll up into the
+#  same entry for unlock thresholds.
+#
+#  Unlock tiers:
+#    discovered @ 1 kill  → entry + locations
+#    lore        @ 10
+#    weaknesses  @ 50
+#    drops       @ 100
+# ============================================================
+
+thresholds:
+  discovered: 1
+  lore: 10
+  weaknesses: 50
+  drops: 100
+
+# Staff/dev reveal — anyone with this permission sees every entry and all
+# detail tiers (Lore / Weaknesses / Drops). Real kill counts still display,
+# and revealed-but-unearned entries are tagged "Revealed by permission".
+# Registered in plugin.yml as default: op, so ops get it automatically.
+reveal-permission: "custominventory.bestiary.reveal"
+
+# Codex background (Nexo glyph) rendering for the bestiary GUI.
+#   glyph  — the char mapped to codex_bg in Nexo interface.yml (ꐜ / U+A41C).
+#   shift  — horizontal pull-left (px) for the 256px frame. Pair with the
+#            glyph's `ascent` in interface.yml when tuning vertical position.
+display:
+  glyph: "ꐜ"
+  shift: 16
+
+entries:
+  f1_cutter:
+    floor: 1
+    family: Forest
+    display: Forest Cutter
+    icon: ZOMBIE_HEAD
+    mythic: [floor1_cutter]
+    elite: [floor1_cutter_elite]
+    role: melee
+    locations: ["Floor 1 — forest around the Hermit's cottage"]
+    lore:
+      - "Axe-wielding undead that patrol the first forest."
+      - "Elites hit harder and shrug off knockback."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Common unidentified gear (zone1_common)"
+      - "Gems (zone1_gems)"
+      - "Currency (zone1_currency)"
+      - "Elite: rolls common + gems + currency twice"
+    boss: false
+
+  f1_archer:
+    floor: 1
+    family: Forest
+    display: Forest Archer
+    icon: SKELETON_SKULL
+    mythic: [floor1_archer]
+    elite: [floor1_archer_elite]
+    role: ranged
+    locations: ["Floor 1 — forest clearings"]
+    lore:
+      - "Bow-using skeletons that keep their distance."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Common unidentified gear (zone1_common)"
+      - "Gems (zone1_gems)"
+      - "Currency (zone1_currency)"
+      - "Elite: doubled common / currency rolls"
+    boss: false
+
+  f1_boar:
+    floor: 1
+    family: Forest
+    display: Wild Boar
+    icon: PORKCHOP
+    mythic: [floor1_boar]
+    elite: [floor1_boar_elite]
+    role: melee
+    locations: ["Floor 1 — forest herds"]
+    lore:
+      - "Neutral until struck, then charges and rallies the herd."
+      - "ModelEngine wild boar; immune to fall and suffocation."
+    resists: ["Fall", "Suffocation"]
+    weaknesses: []
+    drops:
+      - "Common unidentified gear (zone1_common)"
+      - "Gems / currency"
+      - "Porkchop (Mythic drop)"
+      - "Elite: doubled Divinity rolls"
+    boss: false
+
+  f1_gnome:
+    floor: 1
+    family: Gnome
+    display: Gnome
+    icon: PLAYER_HEAD
+    mythic: [floor1_gnome]
+    elite: []
+    role: melee
+    locations: ["Floor 1 — side encounters"]
+    lore:
+      - "Skittish blue gnomes. Separate from the Floor 4 ranch pests."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Common rings only (zone1_common_rings)"
+    boss: false
+
+  f1_troll:
+    floor: 1
+    family: Forest
+    display: Troll Leader
+    icon: WITHER_SKELETON_SKULL
+    mythic: [floor1_troll]
+    elite: []
+    role: boss
+    locations: ["Floor 1 — troll clearing (main story)"]
+    lore:
+      - "Floor 1 miniboss. Smash and slam attacks; BossBar."
+      - "Quest gate for The Forest's Master."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Common gear ×2 + currency ×2"
+      - "TrollSkinCloak — 20% (floor1_troll table)"
+    boss: true
+
+  # ── Floor 2 ───────────────────────────────────────────────
+  f2_tosser:
+    floor: 2
+    family: Caves
+    display: Rock Tosser
+    icon: COBBLESTONE
+    mythic: [floor2_tosser]
+    elite: [floor2_tosser_elite]
+    role: ranged
+    locations: ["Floor 2 — cave tunnels"]
+    lore:
+      - "Throws rocks from range."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Floor 2 common / elite Divinity pools"
+      - "Gems + currency"
+    boss: false
+
+  f2_decayed:
+    floor: 2
+    family: Caves
+    display: Decayed Corpse
+    icon: WITHER_SKELETON_SKULL
+    mythic: [floor2_decayed_corpse]
+    elite: [floor2_decayed_corpse_elite]
+    role: melee
+    locations: ["Floor 2 — deeper caves"]
+    lore:
+      - "Withered husks that strip armor durability on hit."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Floor 2 common / elite Divinity pools"
+      - "Gems + currency"
+    boss: false
+
+  f2_spider:
+    floor: 2
+    family: Caves
+    display: Cave Spider
+    icon: SPIDER_EYE
+    mythic: [floor2_cave_spider]
+    elite: [floor2_cave_spider_elite]
+    role: melee
+    locations: ["Floor 2 — spider nests"]
+    lore:
+      - "Venomous cave spiders. Rowan's Eight Legs quest target."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Floor 2 common / elite Divinity pools"
+      - "Gems + currency"
+    boss: false
+
+  f2_rocky:
+    floor: 2
+    family: Caves
+    display: Rocky
+    icon: IRON_BLOCK
+    mythic: [floor2_rocky]
+    elite: []
+    role: boss
+    locations: ["Floor 2 — cavern bottom"]
+    lore:
+      - "Iron golem boss. Slam, meteor, rock toss. BossBar."
+      - "Takes reduced projectile damage."
+    resists: ["Projectile (×0.25)"]
+    weaknesses: []
+    drops:
+      - "UncommonHammer — 10% (floor2_rocky table)"
+      - "Floor 2 boss / uncommon pools"
+    boss: true
+
+  # ── Floor 3 ───────────────────────────────────────────────
+  f3_walker:
+    floor: 3
+    family: Corruption
+    display: Corrupted Walker
+    icon: ZOMBIE_HEAD
+    mythic: [floor3_walker]
+    elite: [floor3_walker_elite]
+    role: melee
+    locations: ["Floor 3 — corrupted savanna"]
+    lore:
+      - "Faction: corruption. Slow shambling baseline."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Floor 3 common / elite pools"
+      - "Floor 3 dungeon key chance on elites"
+    boss: false
+
+  f3_runner:
+    floor: 3
+    family: Corruption
+    display: Corrupted Runner
+    icon: LEATHER_BOOTS
+    mythic: [floor3_runner]
+    elite: [floor3_runner_elite]
+    role: melee
+    locations: ["Floor 3 — valley"]
+    lore:
+      - "Faster corrupted — closes distance quickly."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Floor 3 common / elite pools"
+    boss: false
+
+  f3_spitter:
+    floor: 3
+    family: Corruption
+    display: Corrupted Spitter
+    icon: SLIME_BALL
+    mythic: [floor3_spitter]
+    elite: [floor3_spitter_elite]
+    role: ranged
+    locations: ["Floor 3 — valley"]
+    lore:
+      - "Ranged spitters. Gear grants light ice defense."
+    resists: ["Ice (~10%)"]
+    weaknesses: []
+    drops:
+      - "Floor 3 common / elite pools"
+    boss: false
+
+  f3_scavenger:
+    floor: 3
+    family: Corruption
+    display: Corrupted Scavenger
+    icon: RABBIT_FOOT
+    mythic: [floor3_scavenger]
+    elite: [floor3_scavenger_elite]
+    role: melee
+    locations: ["Floor 3 — valley"]
+    lore:
+      - "Leap attackers. Immune to fall damage."
+    resists: ["Fall"]
+    weaknesses: []
+    drops:
+      - "Floor 3 common / elite pools"
+    boss: false
+
+  f3_crusher:
+    floor: 3
+    family: Corruption
+    display: Corrupted Crusher
+    icon: IRON_CHESTPLATE
+    mythic: [floor3_crusher]
+    elite: [floor3_crusher_elite]
+    role: melee
+    locations: ["Floor 3 — main water pump"]
+    lore:
+      - "Heavy charge + knock-up. Pump encounter target."
+      - "Physical defense from gear."
+    resists: ["Physical (~10%)"]
+    weaknesses: []
+    drops:
+      - "Floor 3 common / elite pools"
+    boss: false
+
+  f3_impaler:
+    floor: 3
+    family: Corruption
+    display: Corrupted Impaler
+    icon: POINTED_DRIPSTONE
+    mythic: [floor3_impaler]
+    elite: [floor3_impaler_elite]
+    role: melee
+    locations: ["Floor 3 — valley"]
+    lore:
+      - "Spike attacks from below."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Floor 3 common / elite pools"
+    boss: false
+
+  f3_necromancer:
+    floor: 3
+    family: Corruption
+    display: Necromancer
+    icon: WITHER_SKELETON_SKULL
+    mythic: [floor3_boss_necromancer]
+    elite: []
+    role: boss
+    locations: ["Floor 3 dungeon"]
+    lore:
+      - "Dungeon boss. Summons guards and crushers; ground slam."
+      - "Typed defenses across fire, physical, ice, and lightning."
+    resists: ["Fire (~10%)", "Physical (~10%)", "Ice (~10%)", "Lightning (~10%)", "Fall", "Suffocation"]
+    weaknesses: []
+    drops:
+      - "Torn Necromancer set pieces"
+      - "Uncommon gear pools"
+    boss: true
+
+  # ── Floor 4 ───────────────────────────────────────────────
+  f4_gnome:
+    floor: 4
+    family: Gnome
+    display: Gnome
+    icon: PLAYER_HEAD
+    mythic: [floor4_gnome]
+    elite: [floor4_gnome_elite]
+    role: melee
+    locations: ["Floor 4 — Island 2 fields"]
+    lore:
+      - "Green field gnomes infesting House Hearth's crops."
+      - "Those Damn Gnomes quest counts all gnome types."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Rings (floor4_gnome) + currency"
+    boss: false
+
+  f4_gnome_scout:
+    floor: 4
+    family: Gnome
+    display: Gnome Scout
+    icon: LEATHER_BOOTS
+    mythic: [floor4_gnome_scout]
+    elite: [floor4_gnome_scout_elite]
+    role: melee
+    locations: ["Floor 4 — Island 2 fields"]
+    lore:
+      - "Faster red scouts among the gnome infestation."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Rings (floor4_gnome) + currency"
+    boss: false
+
+  f4_gnome_caster:
+    floor: 4
+    family: Gnome
+    display: Gnome Caster
+    icon: BLUE_ICE
+    mythic: [floor4_gnome_caster]
+    elite: [floor4_gnome_caster_elite]
+    role: caster
+    locations: ["Floor 4 — Island 2 fields"]
+    lore:
+      - "Blue casters that throw ice."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Rings (floor4_gnome) + currency"
+    boss: false
+
+  f4_cult_scout:
+    floor: 4
+    family: Cult
+    display: Cult Scout
+    icon: CROSSBOW
+    mythic: [floor4_cult_scout]
+    elite: [floor4_cult_scout_elite]
+    role: ranged
+    locations: ["Floor 4 — Islands 3–6"]
+    lore:
+      - "Pillager scouts of the cult that overran the ranch warehouses."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Common / uncommon gear"
+      - "Gems + currency"
+    boss: false
+
+  f4_cult_enforcer:
+    floor: 4
+    family: Cult
+    display: Cult Enforcer
+    icon: IRON_AXE
+    mythic: [floor4_cult_enforcer]
+    elite: [floor4_cult_enforcer_elite]
+    role: melee
+    locations: ["Floor 4 — Islands 3–6"]
+    lore:
+      - "Vindicator enforcers. Physical strike via mobcast."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Common / uncommon gear"
+      - "Gems + currency"
+    boss: false
+
+  f4_cult_alchemist:
+    floor: 4
+    family: Cult
+    display: Cult Alchemist
+    icon: BREWING_STAND
+    mythic: [floor4_cult_alchemist]
+    elite: [floor4_cult_alchemist_elite]
+    role: caster
+    locations: ["Floor 4 — outer islands"]
+    lore:
+      - "Witches throwing fireballs and brews."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Common / uncommon gear"
+      - "Gems + currency"
+    boss: false
+
+  f4_cult_channeler:
+    floor: 4
+    family: Cult
+    display: Cult Channeler
+    icon: ENDER_EYE
+    mythic: [floor4_cult_channeler]
+    elite: [floor4_cult_channeler_elite]
+    role: caster
+    locations: ["Floor 4 — Island 4 warp pad"]
+    lore:
+      - "Evokers powering the dead warp pad. Drop Channeler Sigils."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Common / uncommon gear, gems, currency"
+      - "Quest: Channeler Sigil (BetonQuest)"
+    boss: false
+
+  f4_cult_captain:
+    floor: 4
+    family: Cult
+    display: Cult Captain
+    icon: NETHERITE_AXE
+    mythic: [floor4_cult_captain]
+    elite: []
+    role: boss
+    locations: ["Floor 4 — cult settlement"]
+    lore:
+      - "Cult miniboss. Fire sweep and fireball. BossBar."
+    resists: []
+    weaknesses: []
+    drops:
+      - "Elite-tier pools + heavier currency/gems"
+      - "Captain-specific Divinity binding"
+    boss: true
+
+  f4_rocky:
+    floor: 4
+    family: Caves
+    display: Rocky (Caged)
+    icon: IRON_BLOCK
+    mythic: [floor4_rocky]
+    elite: []
+    role: boss
+    locations: ["Floor 4 — Island 6 cage crystal"]
+    lore:
+      - "Same species as Floor 2 Rocky, stronger — freed from a charged crystal."
+      - "Kin in the Cage quest boss. No Divinity loot binding yet."
+    resists: ["Projectile (×0.25)"]
+    weaknesses: []
+    drops:
+      - "Mythic exp only — no Divinity binding yet"
+    boss: true
+
+# ── Dungeons tab ─────────────────────────────────────────────
+#  One tile per dungeon. Run counts come from cip_counters
+#  (counter-key, fed by the MythicDungeons finish hook via
+#  /cipcount). Discovered at 1 lifetime run; ops see everything.
+dungeons:
+  floor3_dungeon:
+    display: "The Source"
+    floor: 3
+    icon: END_PORTAL_FRAME
+    counter-key: "dungeon.floor3_dungeon"
+    location: "Corrupted Savanna — sealed portal"
+    lore:
+      - "The corruption's wellspring beneath the"
+      - "savanna. Entered with Nia's key; cleansed"
+      - "when the Necromancer falls."

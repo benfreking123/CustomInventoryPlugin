@@ -276,6 +276,13 @@ public class PlayerGearData {
         return map != null ? map.get(slotId) : null;
     }
 
+    /** Snapshot of slot→permission for admin wipe / revoke. Never null. */
+    public static Map<String, String> getPlayerSlotPerms(UUID uuid) {
+        Map<String, String> map = playerSlotPerms.get(uuid);
+        if (map == null || map.isEmpty()) return Map.of();
+        return Map.copyOf(map);
+    }
+
     public static void removeSlotPermission(UUID uuid, String slotId) {
         if (uuid == null) return;
         Map<String, String> map = playerSlotPerms.get(uuid);

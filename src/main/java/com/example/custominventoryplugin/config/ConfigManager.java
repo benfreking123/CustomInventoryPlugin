@@ -31,6 +31,8 @@ public class ConfigManager {
     // Slots beyond these counts require their per-slot `permission` node.
     private int defaultActiveSlots;
     private int defaultPassiveSlots;
+    /** Ticks before AutoPick vacuums owned ground drops (visual delay). */
+    private int autopickupGroundDelayTicks;
 
     public ConfigManager(Plugin plugin) {
         this.plugin = plugin;
@@ -52,6 +54,7 @@ public class ConfigManager {
             this.lockedPane = this.parseMaterial(this.config.getString("general.locked-pane", "RED_STAINED_GLASS_PANE"), Material.RED_STAINED_GLASS_PANE);
             this.defaultActiveSlots = Math.max(0, this.config.getInt("skill-slots.default-active", 3));
             this.defaultPassiveSlots = Math.max(0, this.config.getInt("skill-slots.default-passive", 2));
+            this.autopickupGroundDelayTicks = Math.max(1, this.config.getInt("autopickup.ground-delay-ticks", 15));
             this.armorSlots.clear();
             this.armorSlots.put("helmet", this.config.getInt("armor-slots.helmet", 0));
             this.armorSlots.put("chestplate", this.config.getInt("armor-slots.chestplate", 9));
@@ -87,7 +90,7 @@ public class ConfigManager {
                         this.plugin.getLogger().warning("Invalid position for custom slot " + key + ": " + position);
                         position = 0;
                     }
-                    CustomSlot slot = new CustomSlot(this.config.getBoolean(path + ".enabled", true), this.config.getString(path + ".form", "ring"), this.config.getString(path + ".type", "accessory"), position, this.config.getString(path + ".slot-type", "skill"), this.config.getString(path + ".lore_match", ""), this.config.getString(path + ".permission", ""));
+                    CustomSlot slot = new CustomSlot(this.config.getBoolean(path + ".enabled", true), this.config.getString(path + ".form", "ring"), this.config.getString(path + ".type", "accessory"), position, this.config.getString(path + ".slot-type", "skill"), this.config.getString(path + ".lore_match", ""), this.config.getString(path + ".id_match", ""), this.config.getString(path + ".permission", ""));
                     this.customSlots.put(key, slot);
                 }
             }
@@ -138,6 +141,10 @@ public class ConfigManager {
 
     public int getDefaultPassiveSlots() {
         return this.defaultPassiveSlots;
+    }
+
+    public int getAutopickupGroundDelayTicks() {
+        return this.autopickupGroundDelayTicks;
     }
 
     private Material parseMaterial(String name, Material fallback) {
@@ -218,6 +225,7 @@ public class ConfigManager {
                 this.config.set(path + ".position", (Object)slot.getPosition());
                 this.config.set(path + ".slot-type", (Object)slot.getSlotType());
                 this.config.set(path + ".lore_match", (Object)slot.getLoreMatch());
+                this.config.set(path + ".id_match", (Object)slot.getIdMatch());
                 this.config.set(path + ".permission", (Object)slot.getPermission());
             }
             this.config.set("debug.enabled", (Object)this.debugMode);
@@ -245,15 +253,17 @@ public class ConfigManager {
         private final int position;
         private final String slotType;
         private final String loreMatch;
+        private final String idMatch;
         private final String permission;
 
-        public CustomSlot(boolean enabled, String form, String type, int position, String slotType, String loreMatch, String permission) {
+        public CustomSlot(boolean enabled, String form, String type, int position, String slotType, String loreMatch, String idMatch, String permission) {
             this.enabled = enabled;
             this.form = form;
             this.type = type;
             this.position = position;
             this.slotType = slotType;
             this.loreMatch = loreMatch;
+            this.idMatch = idMatch == null ? "" : idMatch;
             this.permission = permission == null ? "" : permission;
         }
 
@@ -279,6 +289,11 @@ public class ConfigManager {
 
         public String getLoreMatch() {
             return this.loreMatch;
+        }
+
+        /** Comma-separated substrings matched against the Divinity item id (e.g. "ring"). */
+        public String getIdMatch() {
+            return this.idMatch;
         }
 
         public String getPermission() {

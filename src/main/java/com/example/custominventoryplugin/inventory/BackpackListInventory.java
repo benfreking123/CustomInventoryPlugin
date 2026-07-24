@@ -49,12 +49,12 @@ public class BackpackListInventory implements InventoryHolder {
 
         List<BackpackDef> accessible = config.accessible(player);
         int n = accessible.size();
-        int iconRows = Math.max(1, Math.min(5, (n + 8) / 9));  // cap at 5 so row 6 is the toggle bar
-        int size = (iconRows + 1) * 9;
+        int iconRows = 5;                 // always a full 54-slot generic_54 frame
+        int size = 54;
         int toggleRow = size - 9;
 
-        Component title = Component.text("Your Backpacks").color(NamedTextColor.GOLD)
-                .decoration(TextDecoration.BOLD, true);
+        // generic_54 frame glyph (font: minecraft:default) shifted -16px to centre.
+        Component title = com.example.custominventoryplugin.groupdrop.Text.title("&f\uE200\uA425");
         this.inventory = Bukkit.createInventory(this, size, title);
 
         UUID uuid = player.getUniqueId();
@@ -75,15 +75,11 @@ public class BackpackListInventory implements InventoryHolder {
         // Toggle bar.
         PlayerPickupSettings pp = plugin.getSettingsCache().player(uuid);
         NamespacedKey masterKey = new NamespacedKey(plugin, MASTER_KEY);
-        ItemStack filler = makeFiller();
-        for (int i = toggleRow; i < size; i++) this.inventory.setItem(i, filler);
-        this.inventory.setItem(toggleRow, masterEnabledButton(masterKey, pp));
+        boolean hideMaster = plugin.getAutoLootConfig() != null && plugin.getAutoLootConfig().isHideToggle();
+        this.inventory.setItem(toggleRow, hideMaster ? autoLootInfo() : masterEnabledButton(masterKey, pp));
         this.inventory.setItem(toggleRow + 1, masterGrabButton(masterKey, pp));
-
-        // Fill the icon area's leftover slots.
-        for (int i = n; i < iconCap; i++) {
-            if (this.inventory.getItem(i) == null) this.inventory.setItem(i, filler);
-        }
+        // Leftover icon slots and the rest of the toggle row are left empty so
+        // the generic_54 frame shows through (cells align with the painted art).
     }
 
     private ItemStack masterEnabledButton(NamespacedKey key, PlayerPickupSettings pp) {
@@ -93,6 +89,21 @@ public class BackpackListInventory implements InventoryHolder {
                 "&ePickup: " + (on ? "&aOn" : "&cOff"),
                 List.of("&7Master switch for backpack auto-pickup", "&7(mob drops, mining, fishing, ground).",
                         "", "&eClick to toggle."));
+    }
+
+    /** Inert info tile shown in place of the master toggle when AutoLoot is force-on. */
+    private ItemStack autoLootInfo() {
+        ItemStack it = new ItemStack(Material.LIME_DYE);
+        ItemMeta meta = it.getItemMeta();
+        if (meta != null) {
+            meta.displayName(legacy("&ePickup: &aAlways On"));
+            meta.lore(List.of(
+                    legacy("&7Auto-loot is managed by the server"),
+                    legacy("&7and is always on (mob drops, mining,"),
+                    legacy("&7fishing, ground).")));
+            it.setItemMeta(meta);
+        }
+        return it;
     }
 
     private ItemStack masterGrabButton(NamespacedKey key, PlayerPickupSettings pp) {

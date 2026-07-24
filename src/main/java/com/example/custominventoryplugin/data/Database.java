@@ -179,9 +179,35 @@ public class Database {
                 "  PRIMARY KEY (player_uuid, group_id)" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
+            // ─── bestiary kill counters (v1.7.0) ───────────────────────────
+            // One row per (player, mythic mob id). Elite and base share an
+            // entry in config; their kills are stored under their own mythic
+            // ids and summed at read time.
+            s.executeUpdate(
+                "CREATE TABLE IF NOT EXISTS cip_bestiary_kills (" +
+                "  player_uuid CHAR(36) NOT NULL," +
+                "  mythic_id   VARCHAR(64) NOT NULL," +
+                "  kills       INT NOT NULL DEFAULT 0," +
+                "  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
+                "  PRIMARY KEY (player_uuid, mythic_id)" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+            // ─── generic counters (v1.8.0) ─────────────────────────────────
+            // Dot-namespaced keys (crystal.floor2, dungeon.floor3_dungeon,
+            // checkpoint.floor3_1). Fed by /cipcount from Skript/MD hooks.
+            s.executeUpdate(
+                "CREATE TABLE IF NOT EXISTS cip_counters (" +
+                "  player_uuid CHAR(36) NOT NULL," +
+                "  counter_key VARCHAR(64) NOT NULL," +
+                "  value       INT NOT NULL DEFAULT 0," +
+                "  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
+                "  PRIMARY KEY (player_uuid, counter_key)" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
             plugin.getLogger().info("Schema verified: cip_player_gear, cip_player_slot_attrs, cip_player_slot_perms, "
                     + "cip_player_backpack, cip_player_pickup_settings, cip_player_backpack_settings, "
-                    + "cip_groupdrop_def, cip_groupdrop_option, cip_groupdrop_grant, cip_groupdrop_claim");
+                    + "cip_groupdrop_def, cip_groupdrop_option, cip_groupdrop_grant, cip_groupdrop_claim, "
+                    + "cip_bestiary_kills, cip_counters");
         }
     }
 }

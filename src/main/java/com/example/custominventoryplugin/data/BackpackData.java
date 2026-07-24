@@ -106,6 +106,19 @@ public class BackpackData {
         }
     }
 
+    /** Wipe every backpack row for a player (admin /ci reset). */
+    public void clearAllForPlayer(UUID uuid) {
+        if (uuid == null) return;
+        try (Connection c = database.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "DELETE FROM cip_player_backpack WHERE player_uuid=?")) {
+            ps.setString(1, uuid.toString());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.WARNING, "Backpack clearAllForPlayer failed for " + uuid, e);
+        }
+    }
+
     /**
      * Replace every slot of one backpack in a single batch. Used by
      * smart-pickup which can mutate multiple slots in one event.

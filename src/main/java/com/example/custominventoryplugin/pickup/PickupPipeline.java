@@ -1,6 +1,7 @@
 package com.example.custominventoryplugin.pickup;
 
 import com.example.custominventoryplugin.CustomInventoryPlugin;
+import com.example.custominventoryplugin.autoloot.AutoLootConfig;
 import com.example.custominventoryplugin.config.BackpackConfig;
 import com.example.custominventoryplugin.config.BackpackConfig.BackpackDef;
 import com.example.custominventoryplugin.config.PickupMode;
@@ -38,23 +39,37 @@ public class PickupPipeline {
     private final BackpackData data;
     private final BackpackSettingsCache cache;
     private final NamespacedKey markerKey;
+    private final AutoLootConfig autoLoot;
 
     public PickupPipeline(CustomInventoryPlugin plugin, BackpackConfig config, BackpackData data,
-                          BackpackSettingsCache cache, NamespacedKey markerKey) {
+                          BackpackSettingsCache cache, NamespacedKey markerKey, AutoLootConfig autoLoot) {
         this.plugin = plugin;
         this.config = config;
         this.data = data;
         this.cache = cache;
         this.markerKey = markerKey;
+        this.autoLoot = autoLoot;
     }
 
+    /**
+     * AutoLoot is the server's drop manager: {@code force-all} makes every feed
+     * (mob death, block harvest, fishing, ground) auto-pickup for everyone,
+     * overriding the per-player master toggle and the autopickup permission.
+     * Player Q-drops stay exempt (see {@code BackpackPickupListener}).
+     */
     public boolean masterEnabled(Player player) {
+        if (autoLoot != null && autoLoot.isForceAll()) return true;
         if (!player.hasPermission("custominventory.backpack.autopickup")) return false;
         return cache.player(player.getUniqueId()).isMasterEnabled();
     }
 
     public Session begin(Player player) {
-        return new Session(player);
+        return new Session(player, false);
+    }
+
+    /** Session that routes regardless of the player's master toggle/permission. */
+    public Session beginForced(Player player) {
+        return new Session(player, true);
     }
 
     /** Convenience for single-item feeds. Returns the amount absorbed. */
@@ -75,11 +90,11 @@ public class PickupPipeline {
         private final boolean active;
         private int bagDeposited;
 
-        Session(Player player) {
+        Session(Player player, boolean force) {
             this.player = player;
             this.uuid = player.getUniqueId();
             this.pp = cache.player(uuid);
-            this.active = masterEnabled(player);
+            this.active = force || masterEnabled(player);
             if (active) {
                 Inventory openTop = openBackpackInventory(player);
                 String openId = openBackpackId(player);

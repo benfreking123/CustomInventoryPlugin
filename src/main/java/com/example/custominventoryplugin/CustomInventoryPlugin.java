@@ -3,6 +3,17 @@ package com.example.custominventoryplugin;
 import com.example.custominventoryplugin.commands.BackpackCommand;
 import com.example.custominventoryplugin.commands.DebugCommand;
 import com.example.custominventoryplugin.commands.GearCommand;
+import com.example.custominventoryplugin.compendium.BestiaryConfig;
+import com.example.custominventoryplugin.compendium.BestiaryData;
+import com.example.custominventoryplugin.compendium.BestiaryKillListener;
+import com.example.custominventoryplugin.compendium.CipCountCommand;
+import com.example.custominventoryplugin.compendium.CompendiumCommand;
+import com.example.custominventoryplugin.compendium.CompendiumConfig;
+import com.example.custominventoryplugin.compendium.CompendiumListener;
+import com.example.custominventoryplugin.compendium.CounterData;
+import com.example.custominventoryplugin.compendium.QuestProgress;
+import com.example.custominventoryplugin.autoloot.AutoLootConfig;
+import com.example.custominventoryplugin.autoloot.LootEffectService;
 import com.example.custominventoryplugin.config.BackpackConfig;
 import com.example.custominventoryplugin.config.ConfigManager;
 import com.example.custominventoryplugin.data.BackpackData;
@@ -20,10 +31,14 @@ import com.example.custominventoryplugin.groupdrop.GroupDropConfig;
 import com.example.custominventoryplugin.groupdrop.GroupDropData;
 import com.example.custominventoryplugin.groupdrop.GroupDropListener;
 import com.example.custominventoryplugin.groupdrop.RewardService;
+import com.example.custominventoryplugin.listeners.ArmorAttributeListener;
 import com.example.custominventoryplugin.listeners.BackpackListener;
 import com.example.custominventoryplugin.listeners.BackpackPickupListener;
 import com.example.custominventoryplugin.listeners.InventoryListener;
 import com.example.custominventoryplugin.placeholders.BackpackPlaceholders;
+import com.example.custominventoryplugin.tooltip.TooltipConfig;
+import com.example.custominventoryplugin.tooltip.TooltipListener;
+import com.example.custominventoryplugin.tooltip.TooltipStyleService;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -47,6 +62,15 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
     private GroupDropData groupDropData;
     private GroupDropConfig groupDropConfig;
     private RewardService rewardService;
+    private BestiaryConfig bestiaryConfig;
+    private BestiaryData bestiaryData;
+    private CounterData counterData;
+    private QuestProgress questProgress;
+    private CompendiumConfig compendiumConfig;
+    private TooltipConfig tooltipConfig;
+    private TooltipStyleService tooltipStyleService;
+    private AutoLootConfig autoLootConfig;
+    private LootEffectService lootEffectService;
 
     @Override
     public void onEnable() {
@@ -83,8 +107,24 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
             return;
         }
 
-        getCommand("ci").setExecutor(new GearCommand(this.configManager, this));
-        getCommand("debug").setExecutor(new DebugCommand(this.configManager));
+        // ─── tooltip frames (Divinity tier → minecraft:tooltip_style) ─────
+        this.tooltipConfig = new TooltipConfig(this);
+        this.tooltipStyleService = new TooltipStyleService(this, this.tooltipConfig);
+        getServer().getPluginManager().registerEvents(
+                new TooltipListener(this, this.tooltipStyleService), this);
+        // Fabled attr bonuses for vanilla armor (rings-style PDC read) + tooltip
+        // restamps on attribute change so "(total)" figures stay fresh.
+        getServer().getPluginManager().registerEvents(
+                new ArmorAttributeListener(this, this.configManager), this);
+
+        // ─── AutoLoot (server drop manager: rarity glow/burst + routing) ──
+        this.autoLootConfig = new AutoLootConfig(this);
+        this.lootEffectService = new LootEffectService(this, this.autoLootConfig, this.tooltipStyleService);
+
+        GearCommand gearCommand = new GearCommand(this.configManager, this);
+        getCommand("ci").setExecutor(gearCommand);
+        getCommand("ci").setTabCompleter(gearCommand);
+        getCommand("debug").setExecutor(new DebugCommand(this.configManager, this.tooltipConfig, this.autoLootConfig));
 
         BackpackCommand bpCommand = new BackpackCommand(this, this.backpackConfig, this.backpackData);
         getCommand("bp").setExecutor(bpCommand);
@@ -96,9 +136,13 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
 
         // ─── unified pickup pipeline (replaces the AutoPickup plugin) ──────
         this.pickupPipeline = new PickupPipeline(
-                this, this.backpackConfig, this.backpackData, this.settingsCache, bpListener.getMarkerKey());
+                this, this.backpackConfig, this.backpackData, this.settingsCache,
+                bpListener.getMarkerKey(), this.autoLootConfig);
         getServer().getPluginManager().registerEvents(new BackpackPickupListener(this, this.pickupPipeline), this);
-        getServer().getPluginManager().registerEvents(new DeathLootListener(this, this.pickupPipeline), this);
+        getServer().getPluginManager().registerEvents(
+                new DeathLootListener(this, this.pickupPipeline, this.autoLootConfig, this.lootEffectService), this);
+        getServer().getPluginManager().registerEvents(
+                new com.example.custominventoryplugin.autoloot.GroundGlowListener(this.autoLootConfig, this.lootEffectService), this);
         getServer().getPluginManager().registerEvents(new HarvestPickupListener(this, this.pickupPipeline), this);
         getServer().getPluginManager().registerEvents(this, this);
 
@@ -113,6 +157,23 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
                 new GroupDropCommand(this, this.groupDropConfig, this.groupDropData, this.rewardService, gdListener);
         getCommand("groupdrop").setExecutor(gdCommand);
         getCommand("groupdrop").setTabCompleter(gdCommand);
+
+        // ─── compendium (account/meta + bestiary; collections later) ──────
+        this.bestiaryConfig = new BestiaryConfig(this);
+        this.bestiaryData = new BestiaryData(this, this.database);
+        this.counterData = new CounterData(this, this.database);
+        this.questProgress = new QuestProgress(this, this.database);
+        this.compendiumConfig = new CompendiumConfig(this);
+        getCommand("compendium").setExecutor(new CompendiumCommand(this));
+        getCommand("cipcount").setExecutor(new CipCountCommand(this, this.counterData));
+        getServer().getPluginManager().registerEvents(new CompendiumListener(this), this);
+        if (getServer().getPluginManager().getPlugin("MythicMobs") != null) {
+            getServer().getPluginManager().registerEvents(
+                    new BestiaryKillListener(this, this.bestiaryConfig, this.bestiaryData), this);
+            getLogger().info("MythicMobs detected — bestiary kill tracking enabled.");
+        } else {
+            getLogger().warning("MythicMobs NOT detected — bestiary kills will not be tracked.");
+        }
 
         // PlaceholderAPI expansion (soft-depend)
         if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
@@ -145,6 +206,15 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
     public GroupDropConfig getGroupDropConfig()  { return this.groupDropConfig; }
     public GroupDropData   getGroupDropData()    { return this.groupDropData; }
     public RewardService   getRewardService()    { return this.rewardService; }
+    public BestiaryConfig  getBestiaryConfig()   { return this.bestiaryConfig; }
+    public BestiaryData    getBestiaryData()     { return this.bestiaryData; }
+    public CounterData     getCounterData()      { return this.counterData; }
+    public QuestProgress   getQuestProgress()    { return this.questProgress; }
+    public CompendiumConfig getCompendiumConfig() { return this.compendiumConfig; }
+    public TooltipConfig   getTooltipConfig()    { return this.tooltipConfig; }
+    public TooltipStyleService getTooltipStyleService() { return this.tooltipStyleService; }
+    public AutoLootConfig  getAutoLootConfig()   { return this.autoLootConfig; }
+    public LootEffectService getLootEffectService() { return this.lootEffectService; }
 
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {

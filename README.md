@@ -6,6 +6,99 @@ This is a **fork** of MyServer's original `com.example.custominventoryplugin` JA
 
 ## Changelog
 
+### v1.11.4 — Bestiary reveal + no-flicker nav + config-ification
+
+- **Opped/staff bestiary reveal**: new permission `custominventory.bestiary.reveal`
+  (`plugin.yml` `default: op`). Holders see every entry and all detail tiers
+  (Lore / Weaknesses / Drops) regardless of kills; real kill counts still show and
+  revealed-but-unearned entries are tagged *"Revealed by permission"*. The node is
+  configurable via `bestiary.yml → reveal-permission`.
+- **No-flicker tab/floor navigation**: category and floor clicks now **repaint the
+  open inventory in place** (`BestiaryInventory.render(...)`) instead of
+  `close`+`openInventory`. Kills off the screen flash and the cursor-recenter that
+  happened on every click (kills are cached in the holder for the session).
+- **Blank `???` cells**: undiscovered grid slots are left AIR so the painted `?`
+  from the `codex_bg` art shows through (no more gray-dye placeholder items).
+- **Account book honesty (OP fix)**: floor/haven progress now counts a permission
+  only when **explicitly granted** (`isPermissionSet`), so opped staff no longer see
+  all 100 floors as "done" via Bukkit's op fallback on unregistered `tower.*` nodes.
+- **Config-ification** (tune without a rebuild):
+  - `bestiary.yml`: `reveal-permission`, `display.glyph`, `display.shift`.
+  - `compendium.yml`: `progress.{total-floors,misc-full-hours,weights.*}`,
+    `counters.{crystals,dungeon,checkpoint}-prefix`,
+    `permissions.{floor-done,haven-unlocked,haven-created}` (new `CompendiumConfig`).
+- **Art**: `codex_bg.png` refreshed (baked MOBS/BOSSES tab labels, greyed locked
+  plates); glyph `ascent 54` / `shift 16` alignment retained.
+
+> _1.10.0 – 1.11.3 belong to the parallel auto-loot / pickup-pipeline / tooltip
+> workstream and are documented with that work; 1.11.4 folds the compendium/bestiary
+> changes above on top of it._
+
+### v1.9.0 — Bestiary "codex" reskin (Nexo background + category tabs)
+
+- **New look**: the Bestiary GUIs render over the `codex_bg` Nexo glyph (a 256×256
+  book frame). `Text.nexoBackground(char, shiftLeft)` builds the title component
+  using the `nexo:shift` + `nexo:default` fonts (same trick as Nexo's own menus).
+  Source PNG: `nexo-compat/Oraxen/.../required/ui/codex_bg.png`; glyph registered
+  in `Nexo-shared/glyphs/nexo_defaults/interface.yml` (char `ꐜ` U+A41C, ascent 37).
+- **Category tabs** replace floor buttons: **Mobs** / **Bosses** in the left column
+  (two locked plates reserved for Dungeons + a 4th tab later). Mobs = non-boss
+  entries, Bosses = `boss: true` entries.
+- **Floor paging**: the green arrows step through the floors that have entries in
+  the current category; Close (painted X) exits.
+- Decorative regions (tabs, arrows, close) are AIR so the painted frame shows
+  through — clicks route by raw slot, entry icons sit on the painted grid cells.
+- Detail pane back button returns to the same category + floor.
+- **Alignment note**: vertical fit is tuned by the glyph `ascent` (interface.yml),
+  horizontal by `BG_SHIFT` in `BestiaryInventory`. Grid cell pitch in the art is
+  18px = vanilla chest slot pitch, so one offset aligns the whole grid. Needs a
+  `nexo reload` + relog after deploy to appear.
+
+### v1.8.0 — Quest %, generic counters, Harvest page, Personal Space tile
+
+- **Quest progress is live**: the Account book and My Quests tile count BetonQuest
+  done-tags straight from `betonquest_tags` (MariaDB, cross-server). Tag lists per
+  floor live in `compendium.yml` (hybrid shared) — add a quest's done-tag there and
+  it counts. The 20%-weight quest bar in Account Progress is no longer 0.
+- **Generic counters**: new `cip_counters` table (`player_uuid, counter_key, value`)
+  plus a console-only `/cipcount <player|uuid> <key> [amount]` command. Hooked:
+  charged crystal activations (`crystal.<world>`, from `charged-crystal.sk`),
+  dungeon completions (`dungeon.floor3_dungeon`, from the floor3 dungeon's
+  `enddungeon` FunctionCommand), checkpoint discoveries (`checkpoint.<id>`, from
+  `checkpoints.sk`). Account book shows Quests done / Camps found / Crystals
+  charged / Dungeon runs.
+- **Harvested & Collected page**: farming totals from RivalHarvesterHoes and mining
+  totals from RivalPickaxes via their PAPI placeholders (pickaxes are per-server
+  SQLite, so mining shows the local server's numbers).
+- **Personal Space tile**: Haven status from LP `tower.haven.unlocked` / `.created`.
+
+### v1.7.1 — Bestiary UX + Account layout
+
+- Floor tabs moved to the bottom row as lime/white concrete (gray glass was invisible against the filler).
+- Unlock tiers: discovered@1 · lore@10 · weaknesses@50 · drops@100. Stats removed; drops replace that detail slot. Locations show on discovery.
+- Account page: Account book holds progress % / playtime / deaths / breakdown; My Quests + Floors Completed sit beside it. Floors tooltip shows highest / next gate / zone bar.
+- `bestiary.yml` drops lists grounded in Divinity bindings.
+
+### v1.7.0 — Bestiary
+
+- Bestiary tab inside `/compendium`: floor tabs, discovered vs `???` silhouettes, detail pane with tiered unlocks (discovered @1 / stats @10 / lore @25 / weaknesses @50).
+- MythicMobs kill tracking → MariaDB table `cip_bestiary_kills` (player, mythic_id, kills). Elites stored under their own id and roll up into the base entry.
+- Config: `bestiary.yml` (hybrid shared) — 25 entries for floors 1–4, grounded in MythicMobs stats + Divinity drop bindings. VFX/dummies excluded.
+- Account page Bestiary button is live; Account Progress score now includes real bestiary discovery %.
+- Soft-depend MythicMobs; kill listener only registers when MM is present.
+
+### v1.6.0 — Compendium (account/meta tracker)
+
+- New `/compendium` command (alias `/comp`, permission `custominventory.compendium`, default true) — a read-only progression GUI. Wired to slot 2 of the E-menu button bar (the red-book icon) in `inventory-management-controls.sk`.
+- **Account / Meta landing page (v1):** built entirely from data that already exists — Bukkit statistics (playtime, deaths, mob kills), first-join date, and LuckPerms floor-completion nodes (`tower.floor<N>.done`). No new counters or tables.
+- **Derived "Account Progress" score:** a fixed weighted blend (floors 40 / quests 20 / bestiary 15 / collections 15 / misc 10), never stored. Not-yet-built categories contribute 0, so the number only climbs as those systems ship — it can't desync.
+- Nav row scaffolds the future tabs: Quests opens `/myquest`; Bestiary and Collections show a "coming soon" notice (Compendium v2/v3).
+- All clicks/drags in the GUI are cancelled (nothing is takeable).
+
+### v1.5.2 — Q-drop AutoPick exemption
+
+- Player-dropped items (Q / inventory drop) are tagged and skipped by the AutoPick vacuum so they stay on the ground for vanilla pickup instead of immediately routing back into bags/inventory. Mob/harvest delayed AutoPick is unchanged.
+
 ### v1.4.0 — Group Drops (choose-your-reward)
 
 - New `/groupdrop` command: choose-your-reward selection menus driven by the DB (cross-server).

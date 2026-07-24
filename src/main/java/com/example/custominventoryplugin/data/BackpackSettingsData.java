@@ -133,4 +133,23 @@ public class BackpackSettingsData {
         }
         return out;
     }
+
+    /** Wipe pickup + per-bag settings for a player (admin /ci reset). */
+    public void clearAllForPlayer(UUID uuid) {
+        if (uuid == null) return;
+        try (Connection c = database.getConnection()) {
+            try (PreparedStatement ps = c.prepareStatement(
+                    "DELETE FROM cip_player_pickup_settings WHERE player_uuid=?")) {
+                ps.setString(1, uuid.toString());
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = c.prepareStatement(
+                    "DELETE FROM cip_player_backpack_settings WHERE player_uuid=?")) {
+                ps.setString(1, uuid.toString());
+                ps.executeUpdate();
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.WARNING, "Settings clearAllForPlayer failed for " + uuid, e);
+        }
+    }
 }
