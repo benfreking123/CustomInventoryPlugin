@@ -22,7 +22,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * /ci — opens the Gear Menu.
- * /ci reload — reload settings.yml (debug perm).
+ * /ci reload — hot-reload every CIP config (settings, backpacks, groupdrops,
+ *   tooltip, autoloot, compendium, quest tags, bestiary) without a restart.
  * /ci reset &lt;player&gt; [confirm] — wipe CIP MariaDB gear + backpacks.
  */
 public class GearCommand implements CommandExecutor, TabCompleter {
@@ -44,8 +45,19 @@ public class GearCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage("\u00a7cYou don't have permission to use this command!");
                 return true;
             }
-            this.plugin.getConfigManager().reloadConfig();
-            sender.sendMessage("\u00a7aCustom Inventory configuration reloaded!");
+            // Hot-reload every file-backed config. Each is guarded so one bad
+            // file doesn't abort the rest. compendium.yml feeds both the
+            // Account/menu config and the quest-tag map, so both are reloaded.
+            int ok = 0;
+            ok += safeReload(sender, "settings.yml", () -> plugin.getConfigManager().reloadConfig());
+            ok += safeReload(sender, "backpacks.yml", () -> plugin.getBackpackConfig().reload());
+            ok += safeReload(sender, "groupdrops", () -> plugin.getGroupDropConfig().reload());
+            ok += safeReload(sender, "tooltip", () -> plugin.getTooltipConfig().reload());
+            ok += safeReload(sender, "autoloot", () -> plugin.getAutoLootConfig().reload());
+            ok += safeReload(sender, "compendium.yml", () -> plugin.getCompendiumConfig().load());
+            ok += safeReload(sender, "quest tags", () -> plugin.getQuestProgress().load());
+            ok += safeReload(sender, "bestiary.yml", () -> plugin.getBestiaryConfig().load());
+            sender.sendMessage("\u00a7aCustomInventory reloaded \u00a7f" + ok + "\u00a78/\u00a7f8\u00a7a config section(s).");
             return true;
         }
 
@@ -115,6 +127,18 @@ public class GearCommand implements CommandExecutor, TabCompleter {
         GearInventory gearInventory = new GearInventory(player, this.configManager, this.plugin);
         player.openInventory(gearInventory.getInventory());
         return true;
+    }
+
+    /** Run one config reload, reporting (not throwing) on failure. Returns 1 on success. */
+    private int safeReload(CommandSender sender, String label, Runnable action) {
+        try {
+            action.run();
+            return 1;
+        } catch (Throwable t) {
+            sender.sendMessage("\u00a7c[CIP] Failed to reload " + label + ": " + t.getMessage());
+            plugin.getLogger().warning("Config reload failed for " + label + ": " + t.getMessage());
+            return 0;
+        }
     }
 
     @Override
