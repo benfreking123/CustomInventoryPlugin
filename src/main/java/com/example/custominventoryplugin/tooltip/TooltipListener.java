@@ -3,6 +3,7 @@ package com.example.custominventoryplugin.tooltip;
 import com.destroystokyo.paper.event.player.PlayerArmorChangeEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import org.bukkit.GameMode;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -106,11 +107,32 @@ public final class TooltipListener implements Listener {
 
     // ─── attribute requirement enforcement (basic) ─────────────────────────
 
+    /**
+     * Whether gear requirements apply to this player at all.
+     *
+     * Creative and spectator are exempt, and not just as a courtesy. In creative
+     * the CLIENT owns its own inventory: any slot this plugin rewrites
+     * server-side can be re-asserted from the client's stale copy, and because a
+     * creative client is allowed to conjure items, that re-assertion
+     * materialises a genuine duplicate rather than being corrected. Enforcement
+     * below relocates items, {@link #sweepHands} does so every 5 ticks, so in
+     * creative it produced a steady supply of duplicates.
+     *
+     * A player in creative is building or testing and should be able to hold
+     * anything, which makes exemption the right behaviour independently of the
+     * duplication.
+     */
+    private boolean enforced(Player player) {
+        GameMode mode = player.getGameMode();
+        return mode == GameMode.SURVIVAL || mode == GameMode.ADVENTURE;
+    }
+
     @EventHandler(priority = EventPriority.MONITOR)
     public void onArmorChange(PlayerArmorChangeEvent event) {
         ItemStack equipped = event.getNewItem();
         if (equipped == null || equipped.getType().isAir()) return;
         Player player = event.getPlayer();
+        if (!enforced(player)) return;
         String unmet = service.unmetAttrRequirement(equipped, player);
         if (unmet == null) return;
 
@@ -177,6 +199,18 @@ public final class TooltipListener implements Listener {
         ItemStack held = mainHand ? inv.getItemInMainHand() : inv.getItemInOffHand();
         if (heldDenial(player, held) == null) return;
 
+        // #region agent log
+        com.example.custominventoryplugin.debug.DebugLog.log("B",
+                "TooltipListener.java:200", "sweep IS RELOCATING a held item",
+                java.util.Map.of(
+                        "player", player.getName(),
+                        "mode", player.getGameMode().name(),
+                        "enforced", enforced(player),
+                        "mainHand", mainHand,
+                        "type", held.getType().name(),
+                        "amount", held.getAmount()));
+        // #endregion
+
         ItemStack moved = held.clone();
         if (mainHand) inv.setItemInMainHand(null);
         else inv.setItemInOffHand(null);
@@ -192,6 +226,7 @@ public final class TooltipListener implements Listener {
     /** Denial message if this item can't be held (unmet, non-worn), else null. */
     private String heldDenial(Player player, ItemStack item) {
         if (item == null || item.getType().isAir() || isWorn(item)) return null;
+        if (!enforced(player)) return null;
         return service.unmetAttrRequirement(item, player);
     }
 

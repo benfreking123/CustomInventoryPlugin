@@ -73,6 +73,24 @@ public class BackpackListener implements Listener {
         return false;
     }
 
+    /**
+     * Whether this specific bag refuses the stack.
+     *
+     * Companion to {@link #isForbidden}, which is global — no bag holds a
+     * shulker. This one is per-bag: only the currency pouch holds currency.
+     * Every path that can put an item into a bag (click, drag, sweep,
+     * auto-pickup) checks both, because a restriction enforced on some paths is
+     * not a restriction.
+     *
+     * Item identity comes from Divinity via the tooltip service, so a renamed
+     * vanilla item is distinguished from the plain one it is built on.
+     */
+    public static boolean isRejectedBy(CustomInventoryPlugin plugin, BackpackDef def, ItemStack item) {
+        if (item == null || item.getType().isAir()) return false;
+        if (def == null || !def.isRestricted()) return false;
+        return !def.acceptsId(plugin.getTooltipStyleService().resolveItemId(item));
+    }
+
     // ─── backpack window clicks ───────────────────────────────────────────
 
     @EventHandler
@@ -103,6 +121,11 @@ public class BackpackListener implements Listener {
             if (isForbidden(incoming, markerKey)) {
                 event.setCancelled(true);
                 player.sendActionBar(Component.text("\u00a7cThis item can't go in a backpack."));
+                return;
+            }
+            if (isRejectedBy(plugin, holder.getDef(), incoming)) {
+                event.setCancelled(true);
+                player.sendActionBar(Component.text("\u00a7cThis bag won't hold that."));
                 return;
             }
         }
@@ -136,11 +159,15 @@ public class BackpackListener implements Listener {
         int storageSize = holder.getStorageSize();
         Inventory inv = holder.getInventory();
 
-        // Block drags that touch the control bar or carry a forbidden item.
+        // Block drags that touch the control bar, or that carry an item this bag
+        // won't hold — forbidden anywhere, or outside this bag's allow-list.
         boolean touchesControl = holder.hasControlBar() && event.getRawSlots().stream()
                 .anyMatch(slot -> slot >= storageSize && slot < inv.getSize());
         boolean touchesStorage = event.getRawSlots().stream().anyMatch(slot -> slot < storageSize);
-        if (touchesControl || (touchesStorage && isForbidden(event.getOldCursor(), markerKey))) {
+        ItemStack dragged = event.getOldCursor();
+        boolean refused = touchesStorage
+                && (isForbidden(dragged, markerKey) || isRejectedBy(plugin, holder.getDef(), dragged));
+        if (touchesControl || refused) {
             event.setCancelled(true);
             return;
         }
@@ -217,10 +244,17 @@ public class BackpackListener implements Listener {
             ItemStack it = playerContents[s];
             if (it == null || it.getType().isAir()) continue;
             if (isForbidden(it, markerKey)) continue;
+            // A restricted bag's allow-list outranks every convenience toggle
+            // below, including "grab everything".
+            if (isRejectedBy(plugin, holder.getDef(), it)) continue;
 
             boolean accept = playerGrab || bs.isGrabEverything()
                     || (!bs.getFilter().isEmpty() && bs.getFilter().contains(it.getType()))
-                    || hasMatchInStorage(inv, storageSize, it);
+                    || hasMatchInStorage(inv, storageSize, it)
+                    // A restricted bag has already said yes by accepting the id;
+                    // requiring a material filter too would mean it collected
+                    // nothing until the player hand-built a filter it cannot edit.
+                    || holder.getDef().isRestricted();
             if (!accept) continue;
 
             int remaining = it.getAmount();

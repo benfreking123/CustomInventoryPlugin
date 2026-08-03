@@ -115,7 +115,15 @@ public final class CompendiumStats {
         double floorsPct = clamp01((double) floorsDone.size() / cfg.totalFloors());
         double questsPct = questsTotal == 0 ? 0.0 : clamp01((double) questsDone / questsTotal);
         double bestiaryPct = bestiaryTotal == 0 ? 0.0 : clamp01((double) bestiaryFound / bestiaryTotal);
+        CollectionsConfig collectionsCfg = plugin.getCollectionsConfig();
+        CollectionsService collectionsSvc = plugin.getCollectionsService();
         double collectionsPct = 0.0;
+        if (collectionsCfg != null && collectionsSvc != null && !collectionsCfg.isEmpty()) {
+            int total = collectionsCfg.totalTrackable();
+            if (total > 0) {
+                collectionsPct = clamp01((double) collectionsSvc.discovered(counters) / total);
+            }
+        }
         double miscPct = clamp01(hours / cfg.miscFullHours());
 
         int score = (int) Math.round(

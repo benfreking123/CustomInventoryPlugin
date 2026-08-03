@@ -11,6 +11,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +27,7 @@ public class CompendiumListener implements Listener {
     private final NamespacedKey commandRightKey;
     private final NamespacedKey bestiaryKey;
     private final NamespacedKey harvestKey;
+    private final NamespacedKey collectionsKey;
 
     public CompendiumListener(CustomInventoryPlugin plugin) {
         this.plugin = plugin;
@@ -34,6 +36,7 @@ public class CompendiumListener implements Listener {
         this.commandRightKey = new NamespacedKey(plugin, CompendiumInventory.COMMAND_RIGHT_KEY);
         this.bestiaryKey = new NamespacedKey(plugin, BestiaryInventory.ACTION_KEY);
         this.harvestKey = new NamespacedKey(plugin, HarvestInventory.ACTION_KEY);
+        this.collectionsKey = new NamespacedKey(plugin, CollectionsInventory.ACTION_KEY);
     }
 
     @EventHandler
@@ -42,7 +45,8 @@ public class CompendiumListener implements Listener {
         if (!(holder instanceof CompendiumInventory)
                 && !(holder instanceof BestiaryInventory)
                 && !(holder instanceof BestiaryDetailInventory)
-                && !(holder instanceof HarvestInventory)) {
+                && !(holder instanceof HarvestInventory)
+                && !(holder instanceof CollectionsInventory)) {
             return;
         }
         event.setCancelled(true);
@@ -65,9 +69,8 @@ public class CompendiumListener implements Listener {
                 }
                 case CompendiumInventory.ACT_BESTIARY -> openBestiary(player, BestiaryInventory.CAT_MOBS, null);
                 case CompendiumInventory.ACT_HARVEST -> openHarvest(player);
-                case CompendiumInventory.ACT_COLLECTIONS ->
-                        player.sendMessage("\u00a77Collections aren't ready yet \u2014 coming soon.");
-                case CompendiumInventory.ACT_COMMAND -> {
+                case CompendiumInventory.ACT_COLLECTIONS -> openCollections(player, null, 0);
+                case CompendiumInventory.ACT_COMMAND, CompendiumInventory.ACT_CONSOLE -> {
                     var pdc = meta.getPersistentDataContainer();
                     String cmd = pdc.get(commandKey, PersistentDataType.STRING);
                     String cmdRight = pdc.get(commandRightKey, PersistentDataType.STRING);
@@ -75,10 +78,19 @@ public class CompendiumListener implements Listener {
                         cmd = cmdRight;
                     }
                     if (cmd != null && !cmd.isEmpty()) {
-                        final String run = cmd;
+                        final boolean console = CompendiumInventory.ACT_CONSOLE.equals(action);
+                        final String run = console
+                                ? cmd.replace("{player}", player.getName())
+                                : cmd;
                         player.closeInventory();
-                        plugin.getServer().getScheduler().runTask(plugin,
-                                () -> player.performCommand(run));
+                        plugin.getServer().getScheduler().runTask(plugin, () -> {
+                            if (console) {
+                                plugin.getServer().dispatchCommand(
+                                        plugin.getServer().getConsoleSender(), run);
+                            } else {
+                                player.performCommand(run);
+                            }
+                        });
                     }
                 }
                 default -> { }
@@ -91,6 +103,27 @@ public class CompendiumListener implements Listener {
             String action = meta.getPersistentDataContainer().get(harvestKey, PersistentDataType.STRING);
             if (HarvestInventory.ACT_BACK.equals(action)) {
                 openAccount(player);
+            }
+            return;
+        }
+
+        if (holder instanceof CollectionsInventory list) {
+            // Tabs and arrows are painted AIR — resolve those by raw slot.
+            String action = meta == null ? null
+                    : meta.getPersistentDataContainer().get(collectionsKey, PersistentDataType.STRING);
+            if (action == null) action = list.actionAt(event.getRawSlot());
+            if (action == null) return;
+
+            if (action.equals(CollectionsInventory.ACT_CLOSE)) {
+                player.closeInventory();
+            } else if (action.equals(CollectionsInventory.ACT_ACCOUNT)) {
+                openAccount(player);
+            } else if (action.startsWith(CollectionsInventory.ACT_CAT)) {
+                list.render(action.substring(CollectionsInventory.ACT_CAT.length()), 0);
+            } else if (action.equals(CollectionsInventory.ACT_PREV)) {
+                list.render(list.getCategory(), list.getPage() - 1);
+            } else if (action.equals(CollectionsInventory.ACT_NEXT)) {
+                list.render(list.getCategory(), list.getPage() + 1);
             }
             return;
         }
@@ -147,7 +180,8 @@ public class CompendiumListener implements Listener {
         if (holder instanceof CompendiumInventory
                 || holder instanceof BestiaryInventory
                 || holder instanceof BestiaryDetailInventory
-                || holder instanceof HarvestInventory) {
+                || holder instanceof HarvestInventory
+                || holder instanceof CollectionsInventory) {
             event.setCancelled(true);
         }
     }
@@ -157,6 +191,30 @@ public class CompendiumListener implements Listener {
         plugin.getServer().getScheduler().runTask(plugin, () -> {
             HarvestInventory gui = new HarvestInventory(plugin, player);
             player.openInventory(gui.getInventory());
+        });
+    }
+
+    /** Open Collections; {@code category == null} picks the first populated tab. */
+    private void openCollections(Player player, String category, int page) {
+        CollectionsConfig cfg = plugin.getCollectionsConfig();
+        CollectionsService svc = plugin.getCollectionsService();
+        if (cfg == null || svc == null || cfg.isEmpty()) {
+            player.sendMessage("\u00a77Collections has no entries loaded.");
+            return;
+        }
+        player.closeInventory();
+        svc.observeInventory(player);
+        plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
+            Map<String, Integer> counters = new HashMap<>(plugin.getCounterData() != null
+                    ? plugin.getCounterData().loadAll(player.getUniqueId()) : Map.of());
+            // Discovery writes are deferred, so the sweep above may not have
+            // landed yet; fold this session's keys in or the page lags a pickup.
+            for (String k : svc.knownKeys(player.getUniqueId())) counters.putIfAbsent(k, 1);
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                CollectionsInventory gui = new CollectionsInventory(
+                        plugin, player, category, page, cfg, svc, counters);
+                player.openInventory(gui.getInventory());
+            });
         });
     }
 

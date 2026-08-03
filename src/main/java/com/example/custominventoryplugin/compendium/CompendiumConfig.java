@@ -67,6 +67,32 @@ public class CompendiumConfig {
 
     private final List<Camp> camps = new ArrayList<>();
 
+    /**
+     * A workbench recipe. {@code type} is the bench it sits on (cooking /
+     * crafting) and drives the grouping in the Workbenches tile lore.
+     * An empty {@code node} means the recipe is available to everyone, so
+     * starter recipes still count toward the total.
+     *
+     * <p>Must be kept in step with the Genesis shop that actually sells it:
+     * this list only drives Compendium display, the real gate is the shop
+     * entry's {@code ExtraPermission}.
+     */
+    public static final class Recipe {
+        public final String id;
+        public final String label;
+        public final String type;
+        public final String node;
+
+        Recipe(String id, String label, String type, String node) {
+            this.id = id;
+            this.label = label;
+            this.type = type;
+            this.node = node == null ? "" : node;
+        }
+    }
+
+    private final List<Recipe> recipes = new ArrayList<>();
+
     // Hub GUI layout (custom-slots style). Fully data-driven so tiles can be
     // moved, re-skinned, relabelled or disabled without a rebuild.
     private String menuTitle = "&d&lCompendium";
@@ -175,6 +201,19 @@ public class CompendiumConfig {
             }
         }
 
+        recipes.clear();
+        ConfigurationSection rs = cfg.getConfigurationSection("recipes");
+        if (rs != null) {
+            for (String id : rs.getKeys(false)) {
+                ConfigurationSection s = rs.getConfigurationSection(id);
+                if (s == null) continue;
+                recipes.add(new Recipe(id,
+                        s.getString("label", id),
+                        s.getString("type", "crafting"),
+                        s.getString("node", "")));
+            }
+        }
+
         loadMenu(cfg.getConfigurationSection("menu"));
     }
 
@@ -278,6 +317,7 @@ public class CompendiumConfig {
     public String havenCreatedNode() { return havenCreatedNode; }
 
     public List<Camp> camps() { return Collections.unmodifiableList(camps); }
+    public List<Recipe> recipes() { return Collections.unmodifiableList(recipes); }
 
     public String menuTitle() { return menuTitle; }
     public int menuRows() { return menuRows; }

@@ -1,0 +1,254 @@
+# ============================================================
+#  Collections — the Compendium's trophy tracker
+#
+#  Discovery is permanent: the first time a player obtains a
+#  tracked item, CIP writes `collect.<category>.<id>` into
+#  cip_counters (value = times seen). Selling or dropping the
+#  item never removes the entry.
+#
+#  Armour sets are procedurally generated and have no stable
+#  item id, so they are tracked per element through Divinity's
+#  SetManager and live in their own `sets:` section below.
+#
+#  Generated from the Divinity item definitions — display names
+#  and icons mirror the real items. Hot-reload with /ci reload.
+# ============================================================
+
+# Collections codex frame. Same geometry as the bestiary's codex_bg, but its
+# tab plates are painted ACTIVE / PASSIVE / SETS / UNIQUE — so the tab order
+# below must stay in step with the artwork.
+display:
+  glyph: "ꐫ"
+  shift: 16
+
+# Icon for an entry the player has not obtained yet. Every entry is always
+# listed — a collection's job is to show what is still out there — so this is
+# what marks a cell as empty. Accepts a Material or nexo:<item id>.
+unknown-icon: "nexo:collection_unknown_icon"
+
+# cip_counters key prefix (keys are <prefix><category>.<id>).
+counter-prefix: "collect."
+
+categories:
+  active:
+    display: "Active Gems"
+    icon: NETHER_STAR
+  passive:
+    display: "Passive Gems"
+    icon: AMETHYST_SHARD
+  sets:
+    display: "Armour Sets"
+    icon: LEATHER_CHESTPLATE
+  unique:
+    display: "Unique Items"
+    icon: TOTEM_OF_UNDYING
+
+# Divinity custom items, keyed by ItemStats.getId().
+entries:
+  # ── active (15) ──
+  gem_bomb:
+    category: active
+    display: "Bomb Gem"
+    icon: NETHER_STAR
+    rarity: common
+  gem_charge:
+    category: active
+    display: "Charge Gem"
+    icon: NETHER_STAR
+    rarity: common
+  gem_dart:
+    category: active
+    display: "Dart Gem"
+    icon: NETHER_STAR
+    rarity: common
+  gem_dash:
+    category: active
+    display: "Dash Gem"
+    icon: NETHER_STAR
+    rarity: common
+  gem_iceshard:
+    category: active
+    display: "Ice Shard Gem"
+    icon: NETHER_STAR
+    rarity: common
+  gem_poisonarrow:
+    category: active
+    display: "Poison Arrow Gem"
+    icon: NETHER_STAR
+    rarity: common
+  gem_risingslash:
+    category: active
+    display: "Rising Slash Gem"
+    icon: NETHER_STAR
+    rarity: common
+  gem_smite:
+    category: active
+    display: "Smite Gem"
+    icon: NETHER_STAR
+    rarity: common
+  gem_staticblink:
+    category: active
+    display: "Static Blink Gem"
+    icon: NETHER_STAR
+    rarity: common
+  gem_strike:
+    category: active
+    display: "Strike Gem"
+    icon: NETHER_STAR
+    rarity: common
+  gem_bladefury:
+    category: active
+    display: "Blade Fury Gem"
+    icon: NETHER_STAR
+    rarity: uncommon
+  gem_energybolt:
+    category: active
+    display: "Energy Bolt Gem"
+    icon: NETHER_STAR
+    rarity: uncommon
+  gem_fireball:
+    category: active
+    display: "Fireball Gem"
+    icon: NETHER_STAR
+    rarity: uncommon
+  gem_icybomb:
+    category: active
+    display: "Icy Bomb Gem"
+    icon: NETHER_STAR
+    rarity: uncommon
+  gem_haste_sigil:
+    category: active
+    display: "Haste Sigil Gem"
+    icon: NETHER_STAR
+    rarity: common
+
+  # ── passive (22) ──
+  gem_passive_rabbit:
+    category: passive
+    display: "Rabbit Gem"
+    icon: NETHER_STAR
+    rarity: uncommon
+  passive_lesser_agility:
+    category: passive
+    display: "Lesser Agility Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_lesser_aoe_boost:
+    category: passive
+    display: "Lesser AOE Boost Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_lesser_attack:
+    category: passive
+    display: "Lesser Attack Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_lesser_dexterity:
+    category: passive
+    display: "Lesser Dexterity Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_lesser_health_amp:
+    category: passive
+    display: "Lesser Health Amp Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_lesser_intelligence:
+    category: passive
+    display: "Lesser Intelligence Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_lesser_long_reach:
+    category: passive
+    display: "Lesser Long Reach Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_lesser_mana_amp:
+    category: passive
+    display: "Lesser Mana Amp Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_lesser_movespeed:
+    category: passive
+    display: "Lesser Movespeed Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_lesser_skill_damage_boost:
+    category: passive
+    display: "Lesser Skill Damage Boost Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_lesser_spell:
+    category: passive
+    display: "Lesser Spell Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_lesser_strength:
+    category: passive
+    display: "Lesser Strength Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_lesser_vitality:
+    category: passive
+    display: "Lesser Vitality Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_lesser_wisdom:
+    category: passive
+    display: "Lesser Wisdom Gem"
+    icon: NETHER_STAR
+    rarity: common
+  passive_sparking_attack_mod:
+    category: passive
+    display: "Sparking Attack Mod Gem"
+    icon: NETHER_STAR
+    rarity: uncommon
+  passive_sparking_cold:
+    category: passive
+    display: "Sparking Cold Gem"
+    icon: NETHER_STAR
+    rarity: uncommon
+  passive_sparking_fire:
+    category: passive
+    display: "Sparking Fire Gem"
+    icon: NETHER_STAR
+    rarity: uncommon
+  passive_sparking_light:
+    category: passive
+    display: "Sparking Light Gem"
+    icon: NETHER_STAR
+    rarity: uncommon
+  passive_sparking_physical:
+    category: passive
+    display: "Sparking Physical Gem"
+    icon: NETHER_STAR
+    rarity: uncommon
+  passive_sparking_projectile_mod:
+    category: passive
+    display: "Sparking Projectile Mod Gem"
+    icon: NETHER_STAR
+    rarity: uncommon
+  passive_sparking_spell_mod:
+    category: passive
+    display: "Sparking Spell Mod Gem"
+    icon: NETHER_STAR
+    rarity: uncommon
+
+  # ── unique (1) ──
+  item_troll_skin_cloak:
+    category: unique
+    display: "&aTroll-Skin Cloak"
+    icon: LEATHER_CHESTPLATE
+    rarity: uncommon
+
+# Armour sets — tracked per element via SetManager.
+sets:
+  torn_necromancer:
+    display: "&5Torn Necromancer Set"
+    icon: LEATHER_CHESTPLATE
+    elements: [helmet, chestplate, leggings, boots]
+
+# On disk but deliberately not collectable.
+exclude:
+  - gem_stone_form   # unfinished stub — lore is "Temp while make item"
+  - item_testsword   # test item; also fails to load in Divinity

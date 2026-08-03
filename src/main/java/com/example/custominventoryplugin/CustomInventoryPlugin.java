@@ -6,6 +6,9 @@ import com.example.custominventoryplugin.commands.GearCommand;
 import com.example.custominventoryplugin.compendium.BestiaryConfig;
 import com.example.custominventoryplugin.compendium.BestiaryData;
 import com.example.custominventoryplugin.compendium.BestiaryKillListener;
+import com.example.custominventoryplugin.compendium.CollectionsConfig;
+import com.example.custominventoryplugin.compendium.CollectionsListener;
+import com.example.custominventoryplugin.compendium.CollectionsService;
 import com.example.custominventoryplugin.compendium.CipCountCommand;
 import com.example.custominventoryplugin.compendium.CompendiumCommand;
 import com.example.custominventoryplugin.compendium.CompendiumConfig;
@@ -65,6 +68,9 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
     private BestiaryConfig bestiaryConfig;
     private BestiaryData bestiaryData;
     private CounterData counterData;
+    private CollectionsConfig collectionsConfig;
+    private CollectionsService collectionsService;
+    private CollectionsListener collectionsListener;
     private QuestProgress questProgress;
     private CompendiumConfig compendiumConfig;
     private TooltipConfig tooltipConfig;
@@ -158,15 +164,20 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
         getCommand("groupdrop").setExecutor(gdCommand);
         getCommand("groupdrop").setTabCompleter(gdCommand);
 
-        // ─── compendium (account/meta + bestiary; collections later) ──────
+        // ─── compendium (account/meta + bestiary + collections) ───────────
         this.bestiaryConfig = new BestiaryConfig(this);
         this.bestiaryData = new BestiaryData(this, this.database);
         this.counterData = new CounterData(this, this.database);
         this.questProgress = new QuestProgress(this, this.database);
         this.compendiumConfig = new CompendiumConfig(this);
+        this.collectionsConfig = new CollectionsConfig(this);
+        this.collectionsService = new CollectionsService(this, this.collectionsConfig, this.counterData);
         getCommand("compendium").setExecutor(new CompendiumCommand(this));
         getCommand("cipcount").setExecutor(new CipCountCommand(this, this.counterData));
         getServer().getPluginManager().registerEvents(new CompendiumListener(this), this);
+        this.collectionsListener = new CollectionsListener(this, this.collectionsService);
+        getServer().getPluginManager().registerEvents(this.collectionsListener, this);
+        this.collectionsListener.startSweepTask();
         if (getServer().getPluginManager().getPlugin("MythicMobs") != null) {
             getServer().getPluginManager().registerEvents(
                     new BestiaryKillListener(this, this.bestiaryConfig, this.bestiaryData), this);
@@ -190,6 +201,7 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        if (this.collectionsListener != null) this.collectionsListener.stopSweepTask();
         if (this.database != null) this.database.stop();
         getLogger().info("CustomInventoryPlugin disabled.");
     }
@@ -209,6 +221,8 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
     public BestiaryConfig  getBestiaryConfig()   { return this.bestiaryConfig; }
     public BestiaryData    getBestiaryData()     { return this.bestiaryData; }
     public CounterData     getCounterData()      { return this.counterData; }
+    public CollectionsConfig  getCollectionsConfig()  { return this.collectionsConfig; }
+    public CollectionsService getCollectionsService() { return this.collectionsService; }
     public QuestProgress   getQuestProgress()    { return this.questProgress; }
     public CompendiumConfig getCompendiumConfig() { return this.compendiumConfig; }
     public TooltipConfig   getTooltipConfig()    { return this.tooltipConfig; }

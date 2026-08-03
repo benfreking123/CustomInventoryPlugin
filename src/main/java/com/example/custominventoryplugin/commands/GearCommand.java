@@ -57,7 +57,8 @@ public class GearCommand implements CommandExecutor, TabCompleter {
             ok += safeReload(sender, "compendium.yml", () -> plugin.getCompendiumConfig().load());
             ok += safeReload(sender, "quest tags", () -> plugin.getQuestProgress().load());
             ok += safeReload(sender, "bestiary.yml", () -> plugin.getBestiaryConfig().load());
-            sender.sendMessage("\u00a7aCustomInventory reloaded \u00a7f" + ok + "\u00a78/\u00a7f8\u00a7a config section(s).");
+            ok += safeReload(sender, "collections.yml", () -> plugin.getCollectionsConfig().load());
+            sender.sendMessage("\u00a7aCustomInventory reloaded \u00a7f" + ok + "\u00a78/\u00a7f9\u00a7a config section(s).");
             return true;
         }
 

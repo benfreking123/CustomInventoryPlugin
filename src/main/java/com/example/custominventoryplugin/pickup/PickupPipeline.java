@@ -11,7 +11,6 @@ import com.example.custominventoryplugin.listeners.BackpackListener;
 import com.example.custominventoryplugin.settings.BackpackSettingsCache;
 import com.example.custominventoryplugin.settings.BagSettings;
 import com.example.custominventoryplugin.settings.PlayerPickupSettings;
-import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
@@ -31,6 +30,10 @@ import java.util.UUID;
  *   2. BAG_FIRST / MATCH bags (priority order) take before the inventory
  *   3. the player inventory
  *   4. OVERFLOW bags catch whatever the inventory couldn't hold
+ *
+ * A bag with an {@code accepts-ids} allow-list is offered only the items on it,
+ * regardless of the player's filter or "grab everything" — see
+ * {@link Session#accepts}.
  */
 public class PickupPipeline {
 
@@ -118,14 +121,13 @@ public class PickupPipeline {
             if (stack == null || stack.getType().isAir()) return 0;
             if (BackpackListener.isForbidden(stack, markerKey)) return 0;
 
-            Material m = stack.getType();
             int remaining = stack.getAmount();
             int absorbed = 0;
 
             // Pass A — BAG_FIRST / MATCH bags (take before inventory).
             for (BagCtx bag : bags) {
                 if (remaining <= 0) break;
-                if (!bag.settings.accepts(m, pp.isGrabEverything())) continue;
+                if (!accepts(bag, stack)) continue;
                 PickupMode mode = bag.settings.getMode();
                 int dep;
                 if (mode == PickupMode.BAG_FIRST) dep = bag.deposit(stack, remaining, true);
@@ -153,7 +155,7 @@ public class PickupPipeline {
             for (BagCtx bag : bags) {
                 if (remaining <= 0) break;
                 if (bag.settings.getMode() != PickupMode.OVERFLOW) continue;
-                if (!bag.settings.accepts(m, pp.isGrabEverything())) continue;
+                if (!accepts(bag, stack)) continue;
                 int dep = bag.deposit(stack, remaining, true);
                 remaining -= dep;
                 absorbed += dep;
@@ -162,6 +164,22 @@ public class PickupPipeline {
 
             stack.setAmount(Math.max(0, remaining));
             return absorbed;
+        }
+
+        /**
+         * Whether this bag will take the stack during auto-pickup.
+         *
+         * A restricted bag answers from its own allow-list alone. The per-player
+         * material filter and "grab everything" are conveniences the player owns
+         * and must not be able to widen what the bag is for; and requiring a
+         * material filter as well would mean a restricted bag collected nothing
+         * until the player hand-built a filter it does not let them edit.
+         */
+        private boolean accepts(BagCtx bag, ItemStack stack) {
+            if (bag.def.isRestricted()) {
+                return !BackpackListener.isRejectedBy(plugin, bag.def, stack);
+            }
+            return bag.settings.accepts(stack.getType(), pp.isGrabEverything());
         }
 
         public int bagDeposited() { return bagDeposited; }

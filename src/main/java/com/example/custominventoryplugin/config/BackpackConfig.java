@@ -13,6 +13,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.logging.Level;
@@ -87,9 +88,10 @@ public class BackpackConfig {
                 boolean filterable = s.getBoolean("filterable", true);
                 Set<Material> defaultFilter = parseMaterialSet(s.getStringList("default-filter"), id);
                 double upgradeCost = s.getDouble("upgrade-cost", 0.0);
+                Set<String> acceptIds = parseIdSet(s.getStringList("accepts-ids"));
 
                 BackpackDef def = new BackpackDef(id, display, size, maxSize, tierStep, permission,
-                        ciSlot, icon, defaultMode, filterable, defaultFilter, upgradeCost);
+                        ciSlot, icon, defaultMode, filterable, defaultFilter, upgradeCost, acceptIds);
                 backpacks.put(id, def);
             } catch (Exception e) {
                 plugin.getLogger().log(Level.WARNING, "Failed to load backpack '" + id + "'", e);
@@ -97,6 +99,16 @@ public class BackpackConfig {
         }
 
         plugin.getLogger().info("Loaded " + backpacks.size() + " backpack(s): " + backpacks.keySet());
+
+        // A mistyped accepts-ids entry cannot be caught at load (Divinity may not
+        // have registered its items yet), and the failure is silent and total —
+        // the bag simply holds nothing. Print the list so it can be eyeballed.
+        for (BackpackDef def : backpacks.values()) {
+            if (def.isRestricted()) {
+                plugin.getLogger().info("Backpack '" + def.getId() + "' accepts only "
+                        + def.getAcceptIds().size() + " item id(s): " + def.getAcceptIds());
+            }
+        }
     }
 
     public void reload() { load(); }
@@ -118,6 +130,22 @@ public class BackpackConfig {
             return Material.CHEST;
         }
         return m;
+    }
+
+    /**
+     * Divinity {@code custom_items} ids for an {@code accepts-ids} allow-list.
+     * Not validated against Divinity: this config loads before Divinity may have
+     * registered its items, and a typo that silently emptied the list would turn
+     * a restricted bag into an unrestricted one.
+     */
+    private Set<String> parseIdSet(List<String> ids) {
+        Set<String> out = new LinkedHashSet<>();
+        if (ids == null) return out;
+        for (String raw : ids) {
+            if (raw == null || raw.isBlank()) continue;
+            out.add(raw.trim().toLowerCase(Locale.ROOT));
+        }
+        return out;
     }
 
     private Set<Material> parseMaterialSet(List<String> names, String id) {
@@ -168,10 +196,12 @@ public class BackpackConfig {
         private final boolean filterable;
         private final Set<Material> defaultFilter;
         private final double upgradeCost;
+        /** Divinity item ids this bag will hold. Empty = holds anything. */
+        private final Set<String> acceptIds;
 
         BackpackDef(String id, String displayName, int size, int maxSize, int tierStep, String permission,
                     int ciSlot, Material ciIcon, PickupMode defaultMode, boolean filterable,
-                    Set<Material> defaultFilter, double upgradeCost) {
+                    Set<Material> defaultFilter, double upgradeCost, Set<String> acceptIds) {
             this.id = id.toLowerCase();
             this.displayName = displayName;
             this.size = size;
@@ -184,6 +214,7 @@ public class BackpackConfig {
             this.filterable = filterable;
             this.defaultFilter = defaultFilter == null ? Set.of() : defaultFilter;
             this.upgradeCost = Math.max(0.0, upgradeCost);
+            this.acceptIds = acceptIds == null ? Set.of() : Set.copyOf(acceptIds);
         }
 
         public String getId()             { return id; }
@@ -198,8 +229,31 @@ public class BackpackConfig {
         public boolean isFilterable()     { return filterable; }
         public Set<Material> getDefaultFilter() { return defaultFilter; }
         public double getUpgradeCost()    { return upgradeCost; }
+        public Set<String> getAcceptIds() { return acceptIds; }
         public boolean hasCiButton()      { return ciSlot >= 0; }
         public boolean isFree()           { return permission.isEmpty(); }
+
+        /** True when this bag restricts what it will hold to specific items. */
+        public boolean isRestricted()     { return !acceptIds.isEmpty(); }
+
+        /**
+         * Whether this bag will hold the item carrying the given Divinity id.
+         *
+         * An unrestricted bag takes anything. A restricted bag takes only listed
+         * ids, so a vanilla item — which has no Divinity id and arrives here as
+         * null — is refused. That is the point: a currency pouch must reject a
+         * plain iron nugget while accepting the Chunk of Scrap that shares its
+         * material, which a Material-based filter cannot do.
+         *
+         * Deliberately independent of the per-player pickup filter and of "grab
+         * everything". Those are conveniences the player owns; this is what the
+         * bag *is*, and no toggle should be able to widen it.
+         */
+        public boolean acceptsId(String divinityItemId) {
+            if (acceptIds.isEmpty()) return true;
+            return divinityItemId != null
+                    && acceptIds.contains(divinityItemId.toLowerCase(Locale.ROOT));
+        }
 
         /** Legacy accessor kept for callers: true when the default mode auto-collects. */
         public boolean isSmartPickup()    { return defaultMode != PickupMode.OFF; }

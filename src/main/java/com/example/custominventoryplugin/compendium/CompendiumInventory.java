@@ -22,6 +22,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -42,6 +43,13 @@ public class CompendiumInventory implements InventoryHolder {
     public static final String ACT_HARVEST = "harvest";
     public static final String ACT_CLOSE = "close";
     public static final String ACT_COMMAND = "command";
+    /**
+     * Runs the tile's command from the console instead of the player, with
+     * {@code {player}} substituted. Needed for anything the player must not be
+     * able to type themselves — Genesis shops in particular, since Genesis has
+     * no per-shop permission and {@code climber} holds no Genesis.open.* node.
+     */
+    public static final String ACT_CONSOLE = "console";
 
     private static final DateTimeFormatter DATE =
             DateTimeFormatter.ofPattern("MMM d, yyyy").withZone(ZoneId.systemDefault());
@@ -79,6 +87,8 @@ public class CompendiumInventory implements InventoryHolder {
         scalars.put("quests_total", Integer.toString(st.questsTotal));
         scalars.put("camps", Integer.toString(st.checkpoints));
         scalars.put("camps_total", Integer.toString(cfg.camps().size()));
+        scalars.put("recipes", Integer.toString(knownRecipes()));
+        scalars.put("recipes_total", Integer.toString(cfg.recipes().size()));
         scalars.put("crystals", Integer.toString(st.crystals));
         scalars.put("dungeon_runs", Integer.toString(st.dungeonRuns));
         scalars.put("bestiary_found", Integer.toString(st.bestiaryFound));
@@ -95,12 +105,13 @@ public class CompendiumInventory implements InventoryHolder {
                 bar("Floors", st.floorsPct, cfg.weightFloors()),
                 bar("Quests", st.questsPct, cfg.weightQuests()),
                 bar("Bestiary", st.bestiaryPct, cfg.weightBestiary()),
-                bar("Collections", st.collectionsPct, cfg.weightCollections()) + " &8(soon)",
+                bar("Collections", st.collectionsPct, cfg.weightCollections()),
                 bar("Misc", st.miscPct, cfg.weightMisc())));
         blocks.put("quest_summary", questSummary(st.questRows, st.questsDone, st.questsTotal));
         blocks.put("floors_summary", floorsSummary(st.floorsDone, st.highest, st.floorCount));
         blocks.put("haven_status", havenStatus());
         blocks.put("camps_summary", campsSummary(st.counters));
+        blocks.put("recipes_summary", recipesSummary());
 
         // ── render tiles from config ────────────────────────────────────────
         for (MenuTile tile : cfg.menuTiles()) {
@@ -262,6 +273,53 @@ public class CompendiumInventory implements InventoryHolder {
                     : "&8\u2718 &7???" + where);
         }
         return lore;
+    }
+
+    /**
+     * Configured recipes grouped by bench, with locked ones shown as "???" so
+     * the tile hints at what is still out there. Recipes with an empty node
+     * are available to everyone and always read as known.
+     */
+    private List<String> recipesSummary() {
+        List<String> lore = new ArrayList<>();
+        List<CompendiumConfig.Recipe> recipes = cfg.recipes();
+        if (recipes.isEmpty()) {
+            lore.add("&8No recipes registered yet.");
+            return lore;
+        }
+        Map<String, List<CompendiumConfig.Recipe>> byType = new LinkedHashMap<>();
+        for (CompendiumConfig.Recipe r : recipes) {
+            byType.computeIfAbsent(r.type, k -> new ArrayList<>()).add(r);
+        }
+        boolean first = true;
+        for (Map.Entry<String, List<CompendiumConfig.Recipe>> e : byType.entrySet()) {
+            if (!first) lore.add("");
+            first = false;
+            lore.add("&6" + capitalise(e.getKey()));
+            for (CompendiumConfig.Recipe r : e.getValue()) {
+                lore.add(knowsRecipe(r)
+                        ? "&a\u2714 &f" + r.label
+                        : "&8\u2718 &7???");
+            }
+        }
+        return lore;
+    }
+
+    private boolean knowsRecipe(CompendiumConfig.Recipe r) {
+        return r.node.isEmpty() || hasGranted(r.node);
+    }
+
+    private int knownRecipes() {
+        int n = 0;
+        for (CompendiumConfig.Recipe r : cfg.recipes()) {
+            if (knowsRecipe(r)) n++;
+        }
+        return n;
+    }
+
+    private static String capitalise(String s) {
+        if (s == null || s.isEmpty()) return "";
+        return Character.toUpperCase(s.charAt(0)) + s.substring(1).toLowerCase(Locale.ROOT);
     }
 
     private List<String> havenStatus() {

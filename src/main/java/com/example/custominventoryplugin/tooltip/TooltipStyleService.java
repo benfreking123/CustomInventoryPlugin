@@ -5,6 +5,7 @@ import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.ShadowColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Bukkit;
@@ -46,6 +47,10 @@ public final class TooltipStyleService {
             LegacyComponentSerializer.legacySection();
     private static final PlainTextComponentSerializer PLAIN =
             PlainTextComponentSerializer.plainText();
+    /** Page-1 snapshots only: legacy serialization drops the font style, so a
+     *  legacy round-trip would strip the v3 fonts on every page flip. */
+    private static final net.kyori.adventure.text.serializer.gson.GsonComponentSerializer GSON =
+            net.kyori.adventure.text.serializer.gson.GsonComponentSerializer.gson();
     /** Section divider glyph (network pack, U+E142). */
     private static final char DIVIDER_CHAR = '\uE142';
     private static final char CHECK = '\uE140', CROSS = '\uE141';
@@ -54,9 +59,23 @@ public final class TooltipStyleService {
     private static final String[] ATTR_ORDER =
             {"strength", "dexterity", "intelligence", "vitality", "agility", "wisdom"};
     private static final int ATTR_ICON_BASE = 0xE120;
-    private static final int GLYPH_MIN = 0xE100, GLYPH_MAX = 0xE14F;
+    private static final int GLYPH_MIN = 0xE100, GLYPH_MAX = 0xE15F;
     /** Badge/pill glyph band: rarity E100.. + type pills E110.. */
     private static final int BADGE_MIN = 0xE100, BADGE_MAX = 0xE11F;
+    /** Section header bars (layout v3), E150..E154. ATTACK unused: weapons
+     *  carry damage in the Base line and get no section header. */
+    private static final char HDR_DEFENSE = '\uE151', HDR_REQUIREMENTS = '\uE152',
+            HDR_BONUSES = '\uE153', HDR_SET = '\uE154';
+    private static final int HDR_MIN = 0xE150, HDR_MAX = 0xE154;
+    /** Element icons E130.. in generator order. */
+    private static final String[] ELEM_ORDER =
+            {"physical", "fire", "ice", "lightning", "chaotic"};
+    private static final int ELEM_ICON_BASE = 0xE130;
+    /** Pack fonts (gen-tooltip-assets.py install_ttf_fonts). Body = VT323,
+     *  big = VT323 at 15px — Minecraft bakes size into the font key, so the
+     *  Base line's "large text" is simply a second font. */
+    private static final Key FONT_BODY = Key.key("tower", "tooltip");
+    private static final Key FONT_BIG = Key.key("tower", "big");
 
     /**
      * Unresolved Divinity placeholder left in final lore, e.g.
@@ -82,6 +101,20 @@ public final class TooltipStyleService {
     /** Leading legacy color codes of a line, e.g. "&5" / "&8". */
     private static final Pattern LEADING_CODES =
             Pattern.compile("^((?:&[0-9a-fk-orx])+)");
+    /**
+     * Native Divinity damage/defense line. The item_stats formats prefix a
+     * unicode icon (⚔ 🔥 ❄ ⚡ ☣ 🏹 …), which is exactly why the old CORE_STAT
+     * pattern never matched and the strip kept landing at its fallback (D15):
+     * eat any leading non-letter junk before the type name.
+     */
+    private static final Pattern NATIVE_TYPE = Pattern.compile(
+            "^[^A-Za-z▸]*(Physical|Fire|Ice|Lightning|Chaotic)\\s+(Damage|Defense):\\s*(.+?)\\s*$");
+    /** Native Divinity item stat (stats.yml formats all use the ▸ marker). */
+    private static final Pattern NATIVE_STAT = Pattern.compile(
+            "^▸\\s*([^:]+):\\s*(.+?)\\s*$");
+    /** "Player Level: N+" requirement line (USER_LEVEL). */
+    private static final Pattern PLAYER_LEVEL_LINE = Pattern.compile(
+            "^\\S*\\s*Player Level: (\\d+)\\+?\\s*$");
     /** Item ids that are jewelry/accessories (no Hand line wanted). */
     private static final Pattern ACCESSORY_ID =
             Pattern.compile("ring|amulet|bracelet|relic|talisman|charm|necklace");
@@ -228,9 +261,15 @@ public final class TooltipStyleService {
         boolean changed = false;
         changed |= stripAccessoryHandLine(itemId, lore);
         changed |= extractSetBlock(pdc, lore);
-        changed |= mergeLevelReqAndAttrStrip(pdc, lore, viewer);
-        changed |= appendStatTotals(meta, lore, viewer);
-        changed |= applyFooterDots(pdc, lore);
+        Boolean gear = layoutV3(meta, pdc, lore, viewer);
+        if (gear == null) {
+            // not gear (currency, crystals, …): legacy incremental flow
+            changed |= mergeLevelReqAndAttrStrip(pdc, lore, viewer);
+            changed |= appendStatTotals(meta, lore, viewer);
+            changed |= applyFooterDots(pdc, lore);
+        } else {
+            changed |= gear;
+        }
         changed |= liftSealsAboveFooter(lore);
         changed |= liftContentBelowFooter(lore);
 
@@ -238,6 +277,319 @@ public final class TooltipStyleService {
             meta.lore(lore);
             stack.setItemMeta(meta);
         }
+    }
+
+    // ─── layout v3 (container layout — Docs/dev-design/tooltip-audit.md) ────
+    //
+    // Page 1 for generated gear:
+    //   badge row (pills only)
+    //   BASE — the item's headline native roll, in the big font: armor's top
+    //          item stat, or a weapon's main damage range
+    //   extra native rolls — armor: DEFENSE header bar + element-icon pairs;
+    //          weapons: icon pairs directly under Base, no section (Ben)
+    //   REQUIREMENTS bar + 6-attribute strip + its own Level line
+    //   BONUSES bar + fabled attribute lines (totals suffix retired — it was
+    //          D2's ambiguity)
+    //   SET bar + compact set line, footer dots
+    //
+    // Full rebuild happens when the lore is still in Divinity's format (fresh
+    // drop, or Divinity regenerated after a Smithy touch). Once stamped, the
+    // header-bar glyphs mark the lore as v3 and only viewer-dependent lines
+    // are refreshed. Returns null when the item has no gear content at all.
+
+    private Boolean layoutV3(ItemMeta meta, PersistentDataContainer pdc,
+                             List<Component> lore, Player viewer) {
+        for (Component c : lore) {
+            if (containsGlyphRange(PLAIN.serialize(c), HDR_MIN, HDR_MAX)) {
+                return refreshV3(meta, pdc, lore, viewer);
+            }
+        }
+
+        // ── classify Divinity-format lines ──
+        java.util.Set<String> fabledBases = fabledPlainTexts(pdc);
+        Component badgeRow = null, setLine = null;
+        List<String[]> nativeDamage = new ArrayList<>();   // {color, name, value}
+        List<String[]> nativeDefense = new ArrayList<>();
+        List<String[]> nativeStats = new ArrayList<>();    // {color, name, value}
+        List<Component> fabled = new ArrayList<>();
+        List<Component> misc = new ArrayList<>();
+        Integer levelReq = pdc.get(levelReqKey, PersistentDataType.INTEGER);
+
+        for (Component line : lore) {
+            String plain = PLAIN.serialize(line);
+            String trimmed = plain.trim();
+            String legacy = LEGACY.serialize(line);
+            if (trimmed.isEmpty() || isDividerText(trimmed)) continue;
+            if (containsGlyphRange(plain, BADGE_MIN, BADGE_MAX)) {
+                if (badgeRow == null) badgeRow = line;
+                continue;
+            }
+            if (containsGlyphRange(plain, ATTR_ICON_BASE, ATTR_ICON_BASE + 5)) continue;
+            if (trimmed.contains("Press F") || containsGlyph(plain, DOT_ON, DOT_OFF)) continue;
+            Matcher lvl = PLAYER_LEVEL_LINE.matcher(trimmed);
+            if (lvl.matches()) {
+                levelReq = Integer.parseInt(lvl.group(1));
+                continue;
+            }
+            if (trimmed.startsWith("Set: ")) { setLine = line; continue; }
+            String noSuffix = TOTAL_SUFFIX.matcher(trimmed).replaceFirst("");
+            if (fabledBases.contains(noSuffix)) {
+                fabled.add(fabledLine(meta, legacy, trimmed, noSuffix));
+                continue;
+            }
+            Matcher nt = NATIVE_TYPE.matcher(trimmed);
+            if (nt.matches()) {
+                String[] row = {leadingColor(legacy, "&7"), nt.group(1) + " " + nt.group(2),
+                                cleanValue(nt.group(3))};
+                ("Damage".equals(nt.group(2)) ? nativeDamage : nativeDefense).add(row);
+                continue;
+            }
+            Matcher ns = NATIVE_STAT.matcher(trimmed);
+            if (ns.matches()) {
+                nativeStats.add(new String[]{leadingColor(legacy, "&e"),
+                        ns.group(1).trim(), cleanValue(ns.group(2))});
+                continue;
+            }
+            misc.add(noItalic(line.font() == null ? line.font(FONT_BODY) : line));
+        }
+
+        boolean isGear = !nativeDamage.isEmpty() || !nativeDefense.isEmpty()
+                || !nativeStats.isEmpty() || !fabled.isEmpty()
+                || pdc.has(attrReqKey, PersistentDataType.STRING);
+        if (!isGear) return null;
+        if (levelReq != null) pdc.set(levelReqKey, PersistentDataType.INTEGER, levelReq);
+
+        // ── emit ──
+        List<Component> out = new ArrayList<>();
+        String badgeBase = pdc.get(badgeBaseKey, PersistentDataType.STRING);
+        if (badgeBase == null && badgeRow != null) {
+            badgeBase = LEGACY.serialize(badgeRow);
+            pdc.set(badgeBaseKey, PersistentDataType.STRING, badgeBase);
+        }
+        if (badgeBase != null) out.add(bodyLine(badgeBase));
+
+        boolean weapon = !nativeDamage.isEmpty();
+        List<String[]> pairs;
+        if (weapon) {
+            nativeDamage.sort((a, b) -> Double.compare(valueMagnitude(b[2]), valueMagnitude(a[2])));
+            String[] main = nativeDamage.get(0);
+            out.add(Component.empty());
+            out.add(bigLine("&f" + main[2] + " " + main[0] + main[1]));
+            pairs = nativeDamage.subList(1, nativeDamage.size());
+            if (!pairs.isEmpty()) out.add(iconPairs(pairs));
+            for (String[] st : nativeStats) {
+                out.add(bodyLine(st[0] + st[1] + ": &f" + st[2]));
+            }
+        } else {
+            if (!nativeStats.isEmpty()) {
+                nativeStats.sort((a, b) -> Double.compare(valueMagnitude(b[2]), valueMagnitude(a[2])));
+                String[] main = nativeStats.get(0);
+                out.add(Component.empty());
+                out.add(bigLine("&f" + main[2] + " " + main[0] + main[1]));
+                for (int i = 1; i < nativeStats.size(); i++) {
+                    String[] st = nativeStats.get(i);
+                    out.add(bodyLine(st[0] + st[1] + ": &f" + st[2]));
+                }
+            }
+            pairs = nativeDefense;
+            if (!pairs.isEmpty()) {
+                out.add(bodyLine("&f" + HDR_DEFENSE));
+                out.add(iconPairs(pairs));
+            }
+        }
+
+        out.add(Component.empty());
+        out.add(bodyLine("&f" + HDR_REQUIREMENTS));
+        out.add(stripRowV3(getAttrRequirementFrom(pdc), viewer));
+        Integer req = pdc.get(levelReqKey, PersistentDataType.INTEGER);
+        if (req != null) out.add(levelLineV3(req, viewer));
+
+        if (!fabled.isEmpty()) {
+            out.add(Component.empty());
+            out.add(bodyLine("&f" + HDR_BONUSES));
+            out.addAll(fabled);
+        }
+        if (!misc.isEmpty()) out.addAll(misc);
+        if (setLine != null) {
+            out.add(Component.empty());
+            out.add(bodyLine("&f" + HDR_SET));
+            out.add(noItalic(setLine.font() == null ? setLine.font(FONT_BODY) : setLine));
+        }
+        out.add(Component.empty());
+        out.add(buildFooter(1, totalPages(pdc)).font(FONT_BODY));
+
+        applyNameFont(meta);
+        boolean changed = !out.equals(lore);
+        lore.clear();
+        lore.addAll(out);
+        return changed;
+    }
+
+    /** Already-v3 lore: refresh only the viewer-dependent lines. */
+    private Boolean refreshV3(ItemMeta meta, PersistentDataContainer pdc,
+                              List<Component> lore, Player viewer) {
+        boolean changed = false;
+        for (int i = 0; i < lore.size(); i++) {
+            String plain = PLAIN.serialize(lore.get(i));
+            Component fresh = null;
+            if (containsGlyphRange(plain, ATTR_ICON_BASE, ATTR_ICON_BASE + 5)) {
+                fresh = stripRowV3(getAttrRequirementFrom(pdc), viewer);
+            } else if (plain.contains("Level")
+                    && !plain.contains("Player Level") && !plain.contains("Level Req")) {
+                Integer req = pdc.get(levelReqKey, PersistentDataType.INTEGER);
+                if (req != null) fresh = levelLineV3(req, viewer);
+            } else if (plain.contains("Press F") || containsGlyph(plain, DOT_ON, DOT_OFF)) {
+                fresh = buildFooter(1, totalPages(pdc)).font(FONT_BODY);
+            }
+            if (fresh != null && !fresh.equals(lore.get(i))) {
+                lore.set(i, fresh);
+                changed = true;
+            }
+        }
+        changed |= applyNameFont(meta);
+        return changed;
+    }
+
+    /** Plain, suffix-stripped texts of every fabled stat Divinity stored. */
+    private java.util.Set<String> fabledPlainTexts(PersistentDataContainer pdc) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        for (NamespacedKey key : pdc.getKeys()) {
+            if (!key.getKey().startsWith(FABLED_ATTR_PREFIX)) continue;
+            String stored = pdc.get(key, PersistentDataType.STRING);
+            if (stored == null) continue;
+            for (String part : stored.split("__x__")) {
+                out.add(TOTAL_SUFFIX.matcher(stripSectionCodes(part).trim()).replaceFirst(""));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * A fabled bonus line, totals suffix dropped (D2: "(25)" meant two
+     * different things in one tooltip). Plain text otherwise preserved —
+     * Divinity and Smithy find stats by comparing color-stripped text against
+     * the fogus_loren tags, so the stored copy is re-synced when the visible
+     * suffix goes.
+     */
+    private Component fabledLine(ItemMeta meta, String legacy, String trimmed, String noSuffix) {
+        String cleaned = legacy;
+        Matcher m = TOTAL_SUFFIX.matcher(PLAIN.serialize(LEGACY.deserialize(legacy)));
+        if (m.find()) {
+            int cut = legacy.lastIndexOf('(');
+            if (cut > 0) cleaned = legacy.substring(0, cut).replaceAll("(?:&[0-9a-fk-orx])+$", "").stripTrailing();
+        }
+        Component line = noItalic(LEGACY.deserialize(cleaned).font(FONT_BODY));
+        if (!trimmed.equals(noSuffix)) {
+            syncFabledLoreTag(meta, noSuffix, SECTION.serialize(line));
+        }
+        return line;
+    }
+
+    /** One strip row, all six attributes: zeros dim, the rolled one marked. */
+    private Component stripRowV3(Map.Entry<String, Integer> req, Player viewer) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ATTR_ORDER.length; i++) {
+            String name = ATTR_ORDER[i];
+            char icon = (char) (ATTR_ICON_BASE + i);
+            int need = (req != null && req.getKey().toLowerCase(Locale.ROOT).contains(name))
+                    ? req.getValue() : 0;
+            sb.append("&f").append(icon);
+            if (need > 0) {
+                if (viewer != null) {
+                    boolean met = playerAttribute(viewer, attrKeyFor(name)) >= need;
+                    sb.append(met ? "&a" : "&c").append(met ? CHECK : CROSS).append(' ').append(need);
+                } else {
+                    sb.append("&e").append(need);
+                }
+            } else {
+                sb.append("&8·");
+            }
+            if (i < ATTR_ORDER.length - 1) sb.append(' ');
+        }
+        return noItalic(LEGACY.deserialize(sb.toString()).font(FONT_BODY)
+                .style(s -> s.shadowColor(ShadowColor.none())));
+    }
+
+    /** "✔ Level 8" — its own requirements line (v3), live per viewer. */
+    private Component levelLineV3(int req, Player viewer) {
+        String s;
+        if (viewer != null) {
+            boolean met = playerLevel(viewer) >= req;
+            s = met ? "&f" + CHECK + " &7Level &f" + req
+                    : "&f" + CROSS + " &7Level &c" + req;
+        } else {
+            s = "&7Level &f" + req;
+        }
+        return noItalic(LEGACY.deserialize(s).font(FONT_BODY)
+                .style(st -> st.shadowColor(ShadowColor.none())));
+    }
+
+    /** Element-icon pairs on one line: "❄ +15   ✦ +8". */
+    private Component iconPairs(List<String[]> rows) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < rows.size(); i++) {
+            String[] r = rows.get(i);
+            sb.append("&f").append(elemIcon(r[1])).append(" &f").append(r[2]);
+            if (i < rows.size() - 1) sb.append("   ");
+        }
+        return noItalic(LEGACY.deserialize(sb.toString()).font(FONT_BODY)
+                .style(s -> s.shadowColor(ShadowColor.none())));
+    }
+
+    private char elemIcon(String typeName) {
+        String lower = typeName.toLowerCase(Locale.ROOT);
+        for (int i = 0; i < ELEM_ORDER.length; i++) {
+            if (lower.startsWith(ELEM_ORDER[i])) return (char) (ELEM_ICON_BASE + i);
+        }
+        return (char) ELEM_ICON_BASE;
+    }
+
+    /** Vanilla renders lore (and custom names) italic unless told otherwise. */
+    private static Component noItalic(Component c) {
+        return c.decoration(TextDecoration.ITALIC, TextDecoration.State.FALSE);
+    }
+
+    private Component bodyLine(String legacy) {
+        return noItalic(LEGACY.deserialize(legacy).font(FONT_BODY)
+                .style(s -> s.shadowColor(ShadowColor.none())));
+    }
+
+    private Component bigLine(String legacy) {
+        return noItalic(LEGACY.deserialize(legacy).font(FONT_BIG)
+                .style(s -> s.shadowColor(ShadowColor.none())));
+    }
+
+    /** Item name in the big font, italics off (gear only — v3 paths). */
+    private boolean applyNameFont(ItemMeta meta) {
+        if (!meta.hasDisplayName()) return false;
+        Component name = meta.displayName();
+        if (name == null) return false;
+        Component styled = noItalic(name.font(FONT_BIG));
+        if (styled.equals(name)) return false;
+        meta.displayName(styled);
+        return true;
+    }
+
+    private static String leadingColor(String legacy, String fallback) {
+        Matcher m = LEADING_CODES.matcher(legacy);
+        return m.find() ? m.group(1) : fallback;
+    }
+
+    /** Strip trailing %condition% remnants / stray whitespace from a value. */
+    private static String cleanValue(String v) {
+        return v.replace(" - ", "-").trim();
+    }
+
+    /** Magnitude for "biggest roll first": max of any numbers in the value. */
+    private static double valueMagnitude(String value) {
+        Matcher m = FIRST_NUMBER.matcher(value);
+        double best = 0;
+        while (m.find()) {
+            try {
+                best = Math.max(best, Math.abs(Double.parseDouble(m.group())));
+            } catch (NumberFormatException ignored) { }
+        }
+        return best;
     }
 
     /**
@@ -575,8 +927,8 @@ public final class TooltipStyleService {
             if (i < totalPages) dots.append(' ');
         }
         dots.append("  &8Press &fF &8for next page");
-        return LEGACY.deserialize(dots.toString())
-                .style(s -> s.shadowColor(ShadowColor.none()));
+        return noItalic(LEGACY.deserialize(dots.toString())
+                .style(s -> s.shadowColor(ShadowColor.none())));
     }
 
     // ─── lore cleanup ───────────────────────────────────────────────────────
@@ -612,8 +964,8 @@ public final class TooltipStyleService {
                 changed = true;
                 continue;
             }
-            Component fixed = stripGlyphShadow(line, plain);
-            if (fixed != line) changed = true;
+            Component fixed = noItalic(stripGlyphShadow(line, plain));
+            if (!fixed.equals(line)) changed = true;
             out.add(fixed);
             if (!trimmed.isEmpty()) prevKeptIsDivider = isDivider;
         }
@@ -812,7 +1164,9 @@ public final class TooltipStyleService {
         return config.styleForMaterial(stack.getType().name());
     }
 
-    private String resolveItemId(ItemStack stack) {
+    /** Public id lookup for other systems (e.g. Collections). Null if not a Divinity item. */
+    public String resolveItemId(ItemStack stack) {
+        if (stack == null || stack.getType().isAir()) return null;
         if (divinityAvailable && itemStatsGetId != null) {
             try {
                 Object id = itemStatsGetId.invoke(null, stack);
@@ -902,7 +1256,7 @@ public final class TooltipStyleService {
         int page = pdc.getOrDefault(pageKey, PersistentDataType.INTEGER, 1);
 
         if (page == 1) {
-            pdc.set(page1Key, PersistentDataType.STRING, serializeLore(meta.lore()));
+            pdc.set(page1Key, PersistentDataType.STRING, serializeLoreJson(meta.lore()));
             if (setRaw != null) {
                 showStoredPage(meta, setRaw, 2, totalPages);
             } else {
@@ -915,7 +1269,7 @@ public final class TooltipStyleService {
         } else {
             String page1Raw = pdc.get(page1Key, PersistentDataType.STRING);
             if (page1Raw == null) return false;
-            meta.lore(deserializeLore(page1Raw));
+            meta.lore(deserializeLoreFlexible(page1Raw));
             pdc.set(pageKey, PersistentDataType.INTEGER, 1);
         }
         stack.setItemMeta(meta);
@@ -955,6 +1309,34 @@ public final class TooltipStyleService {
         PersistentDataContainer pdc = stack.getItemMeta().getPersistentDataContainer();
         return pdc.has(page2Key, PersistentDataType.STRING)
                 || pdc.has(pageSetKey, PersistentDataType.STRING);
+    }
+
+    /** GSON per line (compact JSON never contains raw newlines). */
+    private static String serializeLoreJson(List<Component> lore) {
+        if (lore == null || lore.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < lore.size(); i++) {
+            if (i > 0) sb.append('\n');
+            sb.append(GSON.serialize(lore.get(i)));
+        }
+        return sb.toString();
+    }
+
+    /** JSON page-1 snapshot, falling back to legacy for pre-1.14 items. */
+    private static List<Component> deserializeLoreFlexible(String raw) {
+        if (raw == null || raw.isEmpty()) return deserializeLore(raw);
+        if (!raw.startsWith("{") && !raw.startsWith("[") && !raw.startsWith("\"")) {
+            return deserializeLore(raw);
+        }
+        try {
+            List<Component> out = new ArrayList<>();
+            for (String line : raw.split("\n", -1)) {
+                out.add(GSON.deserialize(line));
+            }
+            return out;
+        } catch (Exception e) {
+            return deserializeLore(raw);
+        }
     }
 
     private static String serializeLore(List<Component> lore) {
