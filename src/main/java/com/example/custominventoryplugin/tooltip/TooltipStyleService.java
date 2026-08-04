@@ -59,7 +59,30 @@ public final class TooltipStyleService {
     private static final String[] ATTR_ORDER =
             {"strength", "dexterity", "intelligence", "vitality", "agility", "wisdom"};
     private static final int ATTR_ICON_BASE = 0xE120;
-    private static final int GLYPH_MIN = 0xE100, GLYPH_MAX = 0xE15F;
+    /** Dim chip variants (zero requirement), E126..E12B. */
+    private static final int ATTR_ICON_DIM_BASE = 0xE126;
+    private static final int ATTR_ICON_MAX = 0xE12B;
+    /** Raised-cell glyphs from the first stacked attempt (E170..E17B). Minecraft
+     *  caps a bitmap's ascent at its height, so lifting a chip clear of its own
+     *  line meant lifting it *into* the line above — it collided with the
+     *  REQUIREMENTS bar. Stacking is now two real lore lines (chips, then
+     *  values), and this range only exists to re-stamp those items on hover. */
+    private static final int LEGACY_CELL_MIN = 0xE170, LEGACY_CELL_MAX = 0xE17B;
+    /** Per-chip pixel advances (png width + 1), generator order = ATTR_ORDER. */
+    private static final int[] CHIP_ADV = {19, 19, 20, 19, 19, 21};
+    private static final int CHIP_GAP = 8;
+    /** Bar plate is 162px wide (+1px advance) — exactly the chip row's width, so
+     *  bars reach as far as the chips. "REQUIREMENTS" inks out to x=84, so the
+     *  live level block starts at 94: on the plate, clear of the word. */
+    private static final int BAR_ADV = 163, LEVEL_X = 94;
+    /** ui_check / ui_cross advance at bitmap height 9. */
+    private static final int MARK_ADV = 10;
+    /** VT323 at 10px is effectively monospace: 4px per character. */
+    private static final int VT_CHAR = 4;
+    /** Section rails E160..E163 — thin accent spine on content lines. */
+    private static final char RAIL_DEFENSE = '\uE160', RAIL_REQUIREMENTS = '\uE161',
+            RAIL_BONUSES = '\uE162', RAIL_SET = '\uE163';
+    private static final int GLYPH_MIN = 0xE100, GLYPH_MAX = 0xE1FF;
     /** Badge/pill glyph band: rarity E100.. + type pills E110.. */
     private static final int BADGE_MIN = 0xE100, BADGE_MAX = 0xE11F;
     /** Section header bars (layout v3), E150..E154. ATTACK unused: weapons
@@ -90,6 +113,9 @@ public final class TooltipStyleService {
     /** Old CIP text-style attr requirement line, replaced by the icon strip. */
     private static final Pattern OLD_ATTR_REQ = Pattern.compile(
             "^[\uE140\uE141]?\\s*(?:Strength|Dexterity|Intelligence|Vitality|Agility|Wisdom): \\d+\\+$");
+    /** 1.14.x standalone "✔ Level 8" line — the level now lives in the
+     *  REQUIREMENTS bar itself, so these get removed on refresh. */
+    private static final Pattern OLD_LEVEL_LINE = Pattern.compile("^Level \\d+$");
     /** Base-six stat bonus line, optionally with a previously appended total. */
     private static final Pattern STAT_BONUS = Pattern.compile(
             "^(Strength|Dexterity|Intelligence|Vitality|Agility|Wisdom): ([+-]\\d+)(?:\\s*\\(\\d+\\))?$");
@@ -122,6 +148,8 @@ public final class TooltipStyleService {
     private final JavaPlugin plugin;
     private final TooltipConfig config;
     private final GemTooltip gemTooltip;
+    private final CatalystTooltip catalystTooltip;
+    private final LootboxTooltip lootboxTooltip;
     private final NamespacedKey pageKey;
     private final NamespacedKey page1Key;
     private final NamespacedKey page2Key;     // source / notes page
@@ -131,6 +159,9 @@ public final class TooltipStyleService {
     private final NamespacedKey levelReqKey;
     private final NamespacedKey badgeBaseKey;
     private final NamespacedKey divinityItemIdKey;
+    /** Set when a fogus_loren tag was re-synced during the current stamp pass
+     *  (main thread only) — forces a meta save even if the lore text tied. */
+    private boolean tagsDirty;
 
     private boolean divinityAvailable;
     private Method itemStatsGetId;
@@ -144,6 +175,8 @@ public final class TooltipStyleService {
         this.plugin = plugin;
         this.config = config;
         this.gemTooltip = new GemTooltip(plugin, config);
+        this.catalystTooltip = new CatalystTooltip(plugin, config);
+        this.lootboxTooltip = new LootboxTooltip(plugin, config);
         this.pageKey = new NamespacedKey(plugin, "tt_page");
         this.page1Key = new NamespacedKey(plugin, "tt_page1");
         this.page2Key = new NamespacedKey(plugin, "tt_page2");
@@ -222,12 +255,46 @@ public final class TooltipStyleService {
         if (stylePath != null || itemId != null) {
             if (gemTooltip.isGem(itemId)) {
                 reflowGem(stack, viewer);
+            } else if (catalystTooltip.isCatalyst(itemId)) {
+                reflowCatalyst(stack, itemId);
+            } else if (lootboxTooltip.isLootbox(itemId)) {
+                reflowLootbox(stack, itemId);
             } else {
                 maybeRollAttrRequirement(stack, itemId);
                 restructureLore(stack, itemId, viewer);
             }
             tidyLore(stack);
+            styleName(stack);
         }
+    }
+
+    /**
+     * The big display font, for every item CIP styles.
+     *
+     * This used to live inside the gear layout only, which left gem and catalyst
+     * names in the default font — the one thing on those tooltips that hadn't
+     * been redesigned, and the first thing you read.
+     */
+    private void styleName(ItemStack stack) {
+        ItemMeta meta = stack.getItemMeta();
+        if (meta == null) return;
+        if (applyNameFont(meta)) stack.setItemMeta(meta);
+    }
+
+    /** Lootbox page-1 rebuild via {@link LootboxTooltip}; no viewer state. */
+    private void reflowLootbox(ItemStack stack, String itemId) {
+        ItemMeta meta = stack.getItemMeta();
+        if (meta == null) return;
+        int total = totalPages(meta.getPersistentDataContainer());
+        lootboxTooltip.reflow(stack, itemId, buildFooter(1, total));
+    }
+
+    /** Catalyst page-1 rebuild via {@link CatalystTooltip}; no viewer state. */
+    private void reflowCatalyst(ItemStack stack, String itemId) {
+        ItemMeta meta = stack.getItemMeta();
+        if (meta == null) return;
+        int total = totalPages(meta.getPersistentDataContainer());
+        catalystTooltip.reflow(stack, itemId, buildFooter(1, total));
     }
 
     /** Gem page-1 rebuild (badge row + Fabled skill stats) via {@link GemTooltip}. */
@@ -265,7 +332,7 @@ public final class TooltipStyleService {
         if (gear == null) {
             // not gear (currency, crystals, …): legacy incremental flow
             changed |= mergeLevelReqAndAttrStrip(pdc, lore, viewer);
-            changed |= appendStatTotals(meta, lore, viewer);
+            changed |= normalizeStatBonusLines(meta, lore);
             changed |= applyFooterDots(pdc, lore);
         } else {
             changed |= gear;
@@ -287,10 +354,11 @@ public final class TooltipStyleService {
     //          item stat, or a weapon's main damage range
     //   extra native rolls — armor: DEFENSE header bar + element-icon pairs;
     //          weapons: icon pairs directly under Base, no section (Ben)
-    //   REQUIREMENTS bar + 6-attribute strip + its own Level line
-    //   BONUSES bar + fabled attribute lines (totals suffix retired — it was
-    //          D2's ambiguity)
-    //   SET bar + compact set line, footer dots
+    //   REQUIREMENTS bar (level requirement drawn in-bar, right side) +
+    //          stacked 6-attribute block: chip row, then a value row whose
+    //          numbers are pixel-padded to sit under their chips
+    //   BONUSES bar + railed fabled lines; base-six carry live totals "(12)"
+    //   SET bar + railed set line, footer dots
     //
     // Full rebuild happens when the lore is still in Divinity's format (fresh
     // drop, or Divinity regenerated after a Smithy touch). Once stamped, the
@@ -299,6 +367,7 @@ public final class TooltipStyleService {
 
     private Boolean layoutV3(ItemMeta meta, PersistentDataContainer pdc,
                              List<Component> lore, Player viewer) {
+        tagsDirty = false;
         for (Component c : lore) {
             if (containsGlyphRange(PLAIN.serialize(c), HDR_MIN, HDR_MAX)) {
                 return refreshV3(meta, pdc, lore, viewer);
@@ -324,7 +393,9 @@ public final class TooltipStyleService {
                 if (badgeRow == null) badgeRow = line;
                 continue;
             }
-            if (containsGlyphRange(plain, ATTR_ICON_BASE, ATTR_ICON_BASE + 5)) continue;
+            if (containsGlyphRange(plain, ATTR_ICON_BASE, ATTR_ICON_MAX)
+                    || containsGlyphRange(plain, LEGACY_CELL_MIN, LEGACY_CELL_MAX)
+                    || isChipValueRow(plain)) continue;
             if (trimmed.contains("Press F") || containsGlyph(plain, DOT_ON, DOT_OFF)) continue;
             Matcher lvl = PLAYER_LEVEL_LINE.matcher(trimmed);
             if (lvl.matches()) {
@@ -334,7 +405,7 @@ public final class TooltipStyleService {
             if (trimmed.startsWith("Set: ")) { setLine = line; continue; }
             String noSuffix = TOTAL_SUFFIX.matcher(trimmed).replaceFirst("");
             if (fabledBases.contains(noSuffix)) {
-                fabled.add(fabledLine(meta, legacy, trimmed, noSuffix));
+                fabled.add(fabledLine(meta, legacy, noSuffix));
                 continue;
             }
             Matcher nt = NATIVE_TYPE.matcher(trimmed);
@@ -393,16 +464,17 @@ public final class TooltipStyleService {
             }
             pairs = nativeDefense;
             if (!pairs.isEmpty()) {
+                out.add(Component.empty());
                 out.add(bodyLine("&f" + HDR_DEFENSE));
-                out.add(iconPairs(pairs));
+                out.add(railed(RAIL_DEFENSE, iconPairs(pairs)));
             }
         }
 
         out.add(Component.empty());
-        out.add(bodyLine("&f" + HDR_REQUIREMENTS));
-        out.add(stripRowV3(getAttrRequirementFrom(pdc), viewer));
-        Integer req = pdc.get(levelReqKey, PersistentDataType.INTEGER);
-        if (req != null) out.add(levelLineV3(req, viewer));
+        out.add(requirementsBar(pdc.get(levelReqKey, PersistentDataType.INTEGER), viewer));
+        int[] needs = attrNeeds(getAttrRequirementFrom(pdc));
+        out.add(chipRow(needs));
+        out.add(chipValueRow(needs, viewer));
 
         if (!fabled.isEmpty()) {
             out.add(Component.empty());
@@ -413,33 +485,62 @@ public final class TooltipStyleService {
         if (setLine != null) {
             out.add(Component.empty());
             out.add(bodyLine("&f" + HDR_SET));
-            out.add(noItalic(setLine.font() == null ? setLine.font(FONT_BODY) : setLine));
+            out.add(railed(RAIL_SET,
+                    noItalic(setLine.font() == null ? setLine.font(FONT_BODY) : setLine)));
         }
         out.add(Component.empty());
         out.add(buildFooter(1, totalPages(pdc)).font(FONT_BODY));
 
         applyNameFont(meta);
-        boolean changed = !out.equals(lore);
+        boolean changed = !out.equals(lore) || tagsDirty;
         lore.clear();
         lore.addAll(out);
         return changed;
     }
 
-    /** Already-v3 lore: refresh only the viewer-dependent lines. */
+    /** Already-v3 lore: refresh the viewer-dependent lines (strip row, level
+     *  in the REQUIREMENTS bar, bonus totals, footer) and migrate 1.14.x
+     *  stamps in place — old flat chip rows become stacked cells, the old
+     *  standalone "✔ Level 8" line is deleted (the bar owns it now). */
     private Boolean refreshV3(ItemMeta meta, PersistentDataContainer pdc,
                               List<Component> lore, Player viewer) {
         boolean changed = false;
-        for (int i = 0; i < lore.size(); i++) {
+        for (int i = lore.size() - 1; i >= 0; i--) {
             String plain = PLAIN.serialize(lore.get(i));
+            String bare = stripGlyphs(plain).trim();
             Component fresh = null;
-            if (containsGlyphRange(plain, ATTR_ICON_BASE, ATTR_ICON_BASE + 5)) {
-                fresh = stripRowV3(getAttrRequirementFrom(pdc), viewer);
-            } else if (plain.contains("Level")
-                    && !plain.contains("Player Level") && !plain.contains("Level Req")) {
-                Integer req = pdc.get(levelReqKey, PersistentDataType.INTEGER);
-                if (req != null) fresh = levelLineV3(req, viewer);
+            if (containsGlyphRange(plain, ATTR_ICON_BASE, ATTR_ICON_MAX)
+                    || containsGlyphRange(plain, LEGACY_CELL_MIN, LEGACY_CELL_MAX)) {
+                int[] needs = attrNeeds(getAttrRequirementFrom(pdc));
+                Component chips = chipRow(needs);
+                if (!chips.equals(lore.get(i))) {
+                    lore.set(i, chips);
+                    changed = true;
+                }
+                Component values = chipValueRow(needs, viewer);
+                int next = i + 1;
+                if (next < lore.size() && isChipValueRow(PLAIN.serialize(lore.get(next)))) {
+                    if (!values.equals(lore.get(next))) {
+                        lore.set(next, values);
+                        changed = true;
+                    }
+                } else {
+                    lore.add(next, values);
+                    changed = true;
+                }
+                continue;
+            } else if (plain.indexOf(HDR_REQUIREMENTS) >= 0) {
+                fresh = requirementsBar(
+                        pdc.get(levelReqKey, PersistentDataType.INTEGER), viewer);
+            } else if (OLD_LEVEL_LINE.matcher(bare).matches()) {
+                lore.remove(i);
+                changed = true;
+                continue;
             } else if (plain.contains("Press F") || containsGlyph(plain, DOT_ON, DOT_OFF)) {
                 fresh = buildFooter(1, totalPages(pdc)).font(FONT_BODY);
+            } else {
+                Matcher b = STAT_BONUS.matcher(bare);
+                if (b.matches()) fresh = bonusLine(meta, b.group(1), b.group(2));
             }
             if (fresh != null && !fresh.equals(lore.get(i))) {
                 lore.set(i, fresh);
@@ -447,7 +548,7 @@ public final class TooltipStyleService {
             }
         }
         changed |= applyNameFont(meta);
-        return changed;
+        return changed || tagsDirty;
     }
 
     /** Plain, suffix-stripped texts of every fabled stat Divinity stored. */
@@ -458,70 +559,141 @@ public final class TooltipStyleService {
             String stored = pdc.get(key, PersistentDataType.STRING);
             if (stored == null) continue;
             for (String part : stored.split("__x__")) {
-                out.add(TOTAL_SUFFIX.matcher(stripSectionCodes(part).trim()).replaceFirst(""));
+                out.add(TOTAL_SUFFIX.matcher(
+                        stripGlyphs(stripSectionCodes(part)).trim()).replaceFirst(""));
             }
         }
         return out;
     }
 
     /**
-     * A fabled bonus line, totals suffix dropped (D2: "(25)" meant two
-     * different things in one tooltip). Plain text otherwise preserved —
+     * A fabled bonus line: BONUSES rail + the stat text, base-six attributes
+     * standardized to "&bName&7: +N".
+     *
+     * No running total. Only the base six are Fabled attributes the plugin can
+     * read off the viewer; Projectile Damage, Flat Chaos Damage, Armor and the
+     * resistances are Divinity item stats with no player-side total to query.
+     * Rather than have "(n)" appear on six lines and not the rest of the block,
+     * the section shows item values only (Ben's call).
+     *
      * Divinity and Smithy find stats by comparing color-stripped text against
-     * the fogus_loren tags, so the stored copy is re-synced when the visible
-     * suffix goes.
+     * the fogus_loren tags, so the stored copy is re-synced whenever the
+     * visible line changes shape.
      */
-    private Component fabledLine(ItemMeta meta, String legacy, String trimmed, String noSuffix) {
+    private Component fabledLine(ItemMeta meta, String legacy, String noSuffix) {
+        Matcher b = STAT_BONUS.matcher(noSuffix);
+        if (b.matches()) return bonusLine(meta, b.group(1), b.group(2));
         String cleaned = legacy;
         Matcher m = TOTAL_SUFFIX.matcher(PLAIN.serialize(LEGACY.deserialize(legacy)));
         if (m.find()) {
             int cut = legacy.lastIndexOf('(');
             if (cut > 0) cleaned = legacy.substring(0, cut).replaceAll("(?:&[0-9a-fk-orx])+$", "").stripTrailing();
         }
-        Component line = noItalic(LEGACY.deserialize(cleaned).font(FONT_BODY));
-        if (!trimmed.equals(noSuffix)) {
-            syncFabledLoreTag(meta, noSuffix, SECTION.serialize(line));
-        }
+        Component line = bodyLine("&f" + RAIL_BONUSES + pad(2) + cleaned);
+        tagsDirty |= syncFabledLoreTag(meta, noSuffix, SECTION.serialize(line));
         return line;
     }
 
-    /** One strip row, all six attributes: zeros dim, the rolled one marked. */
-    private Component stripRowV3(Map.Entry<String, Integer> req, Player viewer) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < ATTR_ORDER.length; i++) {
-            String name = ATTR_ORDER[i];
-            char icon = (char) (ATTR_ICON_BASE + i);
-            int need = (req != null && req.getKey().toLowerCase(Locale.ROOT).contains(name))
-                    ? req.getValue() : 0;
-            sb.append("&f").append(icon);
-            if (need > 0) {
-                if (viewer != null) {
-                    boolean met = playerAttribute(viewer, attrKeyFor(name)) >= need;
-                    sb.append(met ? "&a" : "&c").append(met ? CHECK : CROSS).append(' ').append(need);
-                } else {
-                    sb.append("&e").append(need);
-                }
-            } else {
-                sb.append("&8·");
-            }
-            if (i < ATTR_ORDER.length - 1) sb.append(' ');
-        }
-        return noItalic(LEGACY.deserialize(sb.toString()).font(FONT_BODY)
-                .style(s -> s.shadowColor(ShadowColor.none())));
+    /** Standardized base-six bonus line, shared by first stamp and refresh.
+     *  Any "(total)" a previous build left behind is dropped here. */
+    private Component bonusLine(ItemMeta meta, String name, String value) {
+        Component line = bodyLine("&f" + RAIL_BONUSES + pad(2)
+                + "&b" + name + "&7: " + value);
+        tagsDirty |= syncFabledLoreTag(meta, name + ": " + value, SECTION.serialize(line));
+        return line;
     }
 
-    /** "✔ Level 8" — its own requirements line (v3), live per viewer. */
-    private Component levelLineV3(int req, Player viewer) {
-        String s;
-        if (viewer != null) {
-            boolean met = playerLevel(viewer) >= req;
-            s = met ? "&f" + CHECK + " &7Level &f" + req
-                    : "&f" + CROSS + " &7Level &c" + req;
-        } else {
-            s = "&7Level &f" + req;
+    /** Per-attribute requirement values in ATTR_ORDER, 0 where nothing rolled. */
+    private int[] attrNeeds(Map.Entry<String, Integer> req) {
+        int[] needs = new int[ATTR_ORDER.length];
+        for (int i = 0; i < ATTR_ORDER.length; i++) {
+            needs[i] = (req != null
+                    && req.getKey().toLowerCase(Locale.ROOT).contains(ATTR_ORDER[i]))
+                    ? req.getValue() : 0;
         }
-        return noItalic(LEGACY.deserialize(s).font(FONT_BODY)
-                .style(st -> st.shadowColor(ShadowColor.none())));
+        return needs;
+    }
+
+    /**
+     * Top half of the stacked requirements block: the six attribute chips,
+     * spaced by exact pixel pads so {@link #chipValueRow} can line its values
+     * up underneath them on the next lore line. Zero requirements go dim.
+     */
+    private Component chipRow(int[] needs) {
+        StringBuilder sb = new StringBuilder("&f").append(RAIL_REQUIREMENTS).append(pad(2));
+        for (int i = 0; i < ATTR_ORDER.length; i++) {
+            sb.append("&f").append((char)
+                    ((needs[i] > 0 ? ATTR_ICON_BASE : ATTR_ICON_DIM_BASE) + i));
+            if (i < ATTR_ORDER.length - 1) sb.append(pad(CHIP_GAP));
+        }
+        return bodyLine(sb.toString());
+    }
+
+    /**
+     * Bottom half: each value centered under its chip using the same pad
+     * arithmetic as {@link #chipRow}. Rolled requirements carry ✔/✘ + number
+     * (live per viewer); everything else is a dim dot holding the column.
+     */
+    private Component chipValueRow(int[] needs, Player viewer) {
+        StringBuilder sb = new StringBuilder("&f").append(RAIL_REQUIREMENTS).append(pad(2));
+        for (int i = 0; i < ATTR_ORDER.length; i++) {
+            int slot = CHIP_ADV[i] + (i < ATTR_ORDER.length - 1 ? CHIP_GAP : 0);
+            String text;
+            int w;
+            if (needs[i] > 0) {
+                String digits = String.valueOf(needs[i]);
+                if (viewer != null) {
+                    boolean met = playerAttribute(viewer, attrKeyFor(ATTR_ORDER[i])) >= needs[i];
+                    text = (met ? "&a" + CHECK : "&c" + CROSS) + "&f" + digits;
+                    w = MARK_ADV + digits.length() * VT_CHAR;
+                } else {
+                    text = "&e" + digits;
+                    w = digits.length() * VT_CHAR;
+                }
+            } else {
+                text = "&8\u00B7";
+                w = VT_CHAR;
+            }
+            int lead = Math.max(0, (CHIP_ADV[i] - w) / 2);
+            sb.append(pad(lead)).append(text);
+            int trail = slot - lead - w;
+            if (trail > 0) sb.append(pad(trail));
+        }
+        return bodyLine(sb.toString());
+    }
+
+    /** Is this line a chip value row (only marks, digits and dots survive
+     *  glyph-stripping)? Used so a refresh updates it instead of inserting a
+     *  second copy every hover. */
+    private static boolean isChipValueRow(String plain) {
+        String bare = stripGlyphs(plain);
+        if (bare.isBlank()) return false;
+        boolean content = false;
+        for (int i = 0; i < bare.length(); i++) {
+            char c = bare.charAt(i);
+            if (Character.isDigit(c) || c == '\u00B7') content = true;
+            else if (!Character.isWhitespace(c)) return false;
+        }
+        return content;
+    }
+
+    /**
+     * The REQUIREMENTS header bar with the level requirement drawn on its
+     * right side: bar glyph, negative pad back into the plate, level text.
+     */
+    private Component requirementsBar(Integer req, Player viewer) {
+        StringBuilder sb = new StringBuilder("&f").append(HDR_REQUIREMENTS);
+        if (req != null) {
+            sb.append(pad(LEVEL_X - BAR_ADV));
+            if (viewer != null) {
+                boolean met = playerLevel(viewer) >= req;
+                sb.append(met ? "&a" + CHECK : "&c" + CROSS).append(pad(2))
+                  .append("&7Lvl ").append(met ? "&f" : "&c").append(req);
+            } else {
+                sb.append("&7Lvl &e").append(req);
+            }
+        }
+        return bodyLine(sb.toString());
     }
 
     /** Element-icon pairs on one line: "❄ +15   ✦ +8". */
@@ -552,6 +724,14 @@ public final class TooltipStyleService {
     private Component bodyLine(String legacy) {
         return noItalic(LEGACY.deserialize(legacy).font(FONT_BODY)
                 .style(s -> s.shadowColor(ShadowColor.none())));
+    }
+
+    /** Prefix a section rail (thin accent spine + 2px pad) to a built line. */
+    private Component railed(char rail, Component line) {
+        return noItalic(Component.text()
+                .append(bodyLine("&f" + rail + pad(2)))
+                .append(line)
+                .build());
     }
 
     private Component bigLine(String legacy) {
@@ -782,18 +962,20 @@ public final class TooltipStyleService {
         return "base_" + name;
     }
 
-    /** Append the viewer's running total to base-six stat bonus lines. */
-    private boolean appendStatTotals(ItemMeta meta, List<Component> lore, Player viewer) {
-        if (viewer == null) return false;
+    /**
+     * Non-gear path: standardize base-six stat bonus lines and strip any
+     * "(total)" an older build appended. Totals are gone by design — see
+     * {@link #fabledLine}.
+     */
+    private boolean normalizeStatBonusLines(ItemMeta meta, List<Component> lore) {
         boolean changed = false;
         for (int i = 0; i < lore.size(); i++) {
-            String trimmed = PLAIN.serialize(lore.get(i)).trim();
+            String trimmed = stripGlyphs(PLAIN.serialize(lore.get(i))).trim();
             Matcher m = STAT_BONUS.matcher(trimmed);
             if (!m.matches()) continue;
             String name = m.group(1);
             String value = m.group(2);
-            int have = playerAttribute(viewer, attrKeyFor(name.toLowerCase(Locale.ROOT)));
-            Component fresh = LEGACY.deserialize("&b" + name + "&7: " + value + " &8(" + have + ")");
+            Component fresh = LEGACY.deserialize("&b" + name + "&7: " + value);
             if (!fresh.equals(lore.get(i))) {
                 lore.set(i, fresh);
                 changed = true;
@@ -821,7 +1003,8 @@ public final class TooltipStyleService {
             if (!k.startsWith("fogus_loren-item_fabled_attr_")) continue;
             String stored = pdc.get(key, PersistentDataType.STRING);
             if (stored == null || stored.contains("__x__")) continue; // multi-line: not ours
-            String storedBase = TOTAL_SUFFIX.matcher(stripSectionCodes(stored).trim()).replaceFirst("");
+            String storedBase = TOTAL_SUFFIX.matcher(
+                    stripGlyphs(stripSectionCodes(stored)).trim()).replaceFirst("");
             if (!storedBase.equals(baseText)) continue;
             if (!stored.equals(freshSection)) {
                 pdc.set(key, PersistentDataType.STRING, freshSection);
@@ -987,6 +1170,38 @@ public final class TooltipStyleService {
 
     private static boolean containsGlyphRange(String plain, int min, int max) {
         return plain.chars().anyMatch(c -> c >= min && c <= max);
+    }
+
+    /** Remove every pack glyph (badges, cells, rails, pixel pads) from a
+     *  plain-serialized string, leaving only the human-readable text. */
+    private static String stripGlyphs(String s) {
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c < GLYPH_MIN || c > GLYPH_MAX) sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Exact horizontal cursor move in pixels, using the pack's `space` font
+     * provider (E1F0.. = +1,+2,+4,+8,+16,+32 / E1F8.. = the negatives).
+     * Negative moves are how text lands *inside* a previously drawn glyph —
+     * the level in the REQUIREMENTS bar, the values under the stacked cells.
+     */
+    private static String pad(int px) {
+        if (px == 0) return "";
+        int base = px > 0 ? 0xE1F0 : 0xE1F8;
+        int n = Math.abs(px);
+        StringBuilder sb = new StringBuilder();
+        for (int k = 5; k >= 0; k--) {
+            int unit = 1 << k;
+            while (n >= unit) {
+                sb.append((char) (base + k));
+                n -= unit;
+            }
+        }
+        return sb.toString();
     }
 
     private static boolean containsGlyph(String plain, char a, char b) {
@@ -1278,6 +1493,10 @@ public final class TooltipStyleService {
             String itemId = resolveItemId(stack);
             if (gemTooltip.isGem(itemId)) {
                 reflowGem(stack, viewer);
+            } else if (catalystTooltip.isCatalyst(itemId)) {
+                reflowCatalyst(stack, itemId);
+            } else if (lootboxTooltip.isLootbox(itemId)) {
+                reflowLootbox(stack, itemId);
             } else {
                 restructureLore(stack, itemId, viewer);
             }

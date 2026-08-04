@@ -85,11 +85,6 @@ public final class ArmorAttributeListener implements Listener {
         return out;
     }
 
-    // #region agent log
-    private static final java.util.concurrent.atomic.AtomicInteger DBG_RESTAMPS =
-            new java.util.concurrent.atomic.AtomicInteger();
-    // #endregion
-
     /**
      * Fabled fires this from giveAttribute/upAttribute/refunds — covers manual
      * point allocation, ring swaps and our own armor deltas in one place.
@@ -106,17 +101,6 @@ public final class ArmorAttributeListener implements Listener {
             pendingRestamp.remove(player.getUniqueId());
             TooltipStyleService service = plugin.getTooltipStyleService();
             if (service != null && player.isOnline()) {
-                // #region agent log
-                org.bukkit.inventory.ItemStack dbgHeld = player.getInventory().getItemInMainHand();
-                com.example.custominventoryplugin.debug.DebugLog.log("A",
-                        "ArmorAttributeListener.java:104", "restamp+updateInventory firing",
-                        java.util.Map.of(
-                                "player", player.getName(),
-                                "mode", player.getGameMode().name(),
-                                "n", DBG_RESTAMPS.incrementAndGet(),
-                                "heldType", dbgHeld == null ? "null" : dbgHeld.getType().name(),
-                                "heldAmount", dbgHeld == null ? -1 : dbgHeld.getAmount()));
-                // #endregion
                 service.stampPlayer(player);
                 // Push the refreshed lore to the client so an already-open
                 // inventory / hovered item reflects the new req strip + totals

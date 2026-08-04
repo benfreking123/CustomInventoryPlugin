@@ -1,5 +1,6 @@
 package com.example.custominventoryplugin.tooltip;
 
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.ShadowColor;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
@@ -29,15 +30,28 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Wynn-style page-1 reflow for skill gems (Divinity custom_items, ids
- * {@code gem_*} / {@code passive_*}). Layout:
- * badge row [RARITY][GEM][ELEMENT(%)] + Active/Passive tag, the gem's flavor
- * text, then a stats block sourced from the connected Fabled dynamic skill —
- * the skill's own icon-lore lines (damage-type split percentages, damage
- * classifier, crit info), buff multipliers and numeric damage walked out of
- * the component tree, and live mana/cooldown with per-level scaling. The
- * skill is resolved by display name minus " Gem" (SkillHandler's rule).
- * See Docs/deisgn/tooltips.md.
+ * Sectioned page-1 reflow for skill gems (Divinity custom_items, ids
+ * {@code gem_*} / {@code passive_*}), matching the gear layout's vocabulary of
+ * labeled bars and rails:
+ *
+ * <pre>
+ *   [COMMON][GEM][ACTIVE][PROJECTILE][PHYSICAL]   badges, wrapped as needed
+ *   18 Physical Damage                            what the viewer actually hits for
+ *   DESCRIPTION ─────────────────────
+ *   ▌ what the skill does
+ *   DAMAGE  3x hits ──────── Crit 4% / +50%
+ *   ▌ PHYSICAL (100%)  PROJECTILE (100%)          element share + tag weights
+ *   ▌ base 4   multiplier x1.5
+ *   COST ────────────────────────────
+ *   ▌ MANA 5 (+2/lvl)  COOLDOWN 3s
+ *   SKILL ─────────────────── Lv 2/5
+ * </pre>
+ *
+ * The damage numbers are computed by {@link SkillMath} from the connected
+ * Fabled skill's own {@code Value Math} equations rather than read from lore,
+ * because hand-written gem lore drifts — some still advertises the retired
+ * Energy damage type. The skill is resolved by display name minus " Gem"
+ * (SkillHandler's rule). See Docs/dev-design/tooltips.md.
  */
 final class GemTooltip {
 
@@ -57,9 +71,27 @@ final class GemTooltip {
             "physical", '\uE130', "fire", '\uE131', "ice", '\uE132',
             "lightning", '\uE133', "chaotic", '\uE134');
     private static final char DIVIDER = '\uE142';
+    /** Boost-tag pills U+E180.., in gen-tooltip-assets.py order. */
+    private static final Map<String, Character> TAG_PILL = Map.of(
+            "attack", '\uE180', "projectile", '\uE181', "spell", '\uE182',
+            "area", '\uE183', "poison", '\uE184', "buff", '\uE185',
+            "movement", '\uE186', "sigil", '\uE187');
+    private static final char PILL_MANA = '\uE188', PILL_COOLDOWN = '\uE189';
+    private static final char PILL_ACTIVE = '\uE18A', PILL_PASSIVE = '\uE18B';
+    private static final char CHECK = '\uE140', CROSS = '\uE141';
+    private static final Map<String, Character> RAIL = Map.of(
+            "description", '\uE164', "damage", '\uE165',
+            "cost", '\uE166', "skill", '\uE167');
     private static final int MAX_WALK_DEPTH = 16;
+    /** Narrowest tooltip we lay out to; also the gear chip row's width. */
+    private static final int MIN_WIDTH = 163;
+    /** Gap from a bar's baked label to text drawn after it, and from its end. */
+    private static final int LABEL_GAP = 3, RIGHT_GAP = 6;
     /** Snapshot layout version (bump when the parse/stored shape changes). */
     private static final String SNAPSHOT_VERSION = "2";
+
+    private static final Key FONT_BODY = Key.key("tower", "tooltip");
+    private static final Key FONT_BIG = Key.key("tower", "big");
 
     /** A lore line that is a stat, not flavor: "Cooldown: 3s", "Crit: ...". */
     private static final Pattern STAT_LABEL = Pattern.compile(
@@ -70,6 +102,7 @@ final class GemTooltip {
     private static final Pattern TYPE_VALUE = Pattern.compile("([^(]+)(?:\\((\\d+%)\\))?");
 
     private final TooltipConfig config;
+    private final TooltipGlyphs glyphs;
     private final NamespacedKey pageKey;
     private final NamespacedKey gemInfoKey;
     private final NamespacedKey gemDescKey;
@@ -77,6 +110,7 @@ final class GemTooltip {
 
     GemTooltip(JavaPlugin plugin, TooltipConfig config) {
         this.config = config;
+        this.glyphs = new TooltipGlyphs(plugin);
         this.pageKey = new NamespacedKey(plugin, "tt_page");
         this.gemInfoKey = new NamespacedKey(plugin, "tt_gem");
         this.gemDescKey = new NamespacedKey(plugin, "tt_gem_desc");
@@ -142,24 +176,8 @@ final class GemTooltip {
         IconDetails icon = skill == null
                 ? new IconDetails(List.of(), List.of()) : iconDetails(skill, level);
 
-        List<Component> lore = new ArrayList<>();
-        lore.add(noShadow(LEGACY.deserialize(badgeRow(info))));
-        lore.add(divider());
-        // Prefer the Fabled skill's own lore body (type split + description);
-        // the gem item's hand-written text is the fallback.
-        for (String line : icon.body().isEmpty() ? desc : icon.body()) {
-            lore.add(LEGACY.deserialize(line));
-        }
-
-        List<String> stats = statsBlock(skill, icon.stats(), loreStats, playerLevel);
-        if (!stats.isEmpty()) {
-            lore.add(divider());
-            for (String line : stats) {
-                lore.add(LEGACY.deserialize(line));
-            }
-        }
-        lore.add(Component.empty());
-        lore.add(footer);
+        List<Component> lore = layout(info, skill, icon, desc, loreStats,
+                viewer, playerLevel, footer);
 
         if (!lore.equals(meta.lore())) {
             meta.lore(lore);
@@ -170,84 +188,287 @@ final class GemTooltip {
 
     // ─── layout ─────────────────────────────────────────────────────────────
 
-    /** "[RARITY][GEM][ELEM] (150%)  Active" — non-element types as colored text. */
-    private String badgeRow(Info info) {
-        StringBuilder sb = new StringBuilder("&f");
-        Character rarity = info.rarity == null ? null
-                : RARITY_PILL.get(info.rarity.toLowerCase(Locale.ROOT));
-        sb.append(rarity == null ? RARITY_PILL.get("common") : rarity);
-        sb.append(' ').append(GEM_PILL);
-        if (info.type != null && !info.type.isBlank()) {
-            Character elem = ELEMENT_PILL.get(info.type.toLowerCase(Locale.ROOT));
-            if (elem != null) {
-                sb.append(' ').append(elem);
-            } else {
-                sb.append("  ").append(config.gemTypeColor(info.type)).append(info.type);
+    /** Legacy colours matching the six base-attribute chips. */
+    private static final Map<String, String> ATTR_COLOR = Map.of(
+            "strength", "&c", "dexterity", "&a", "intelligence", "&9",
+            "vitality", "&d", "agility", "&b", "wisdom", "&5");
+
+    /** A bar line: the section, text tucked in after its label, text hung off
+     *  its right end. Both insets are optional. */
+    private record BarLine(TooltipGlyphs.Bar bar, String after, String right) { }
+
+    /** A headline drawn in the big font, which measures 6px per character. */
+    private record Big(String text) { }
+
+    /**
+     * Build page 1.
+     *
+     * Laid out in two passes: collect the content, then size every bar to the
+     * widest line so the bars span the tooltip instead of stopping short of it
+     * — a bar that is the widest line *becomes* the tooltip's width, so it
+     * always reaches both edges.
+     */
+    private List<Component> layout(Info info, Skill skill, IconDetails icon,
+                                   List<String> desc, List<String> loreStats,
+                                   Player viewer, int playerLevel, Component footer) {
+        glyphs.refresh();
+        int level = Math.max(1, playerLevel);
+        SkillMath.Damage damage = skill == null ? null : SkillMath.of(skill, viewer, level);
+        List<SkillMath.Grant> grants = skill == null
+                ? List.of() : SkillMath.grants(skill, level);
+        boolean passive = info.form != null
+                && info.form.toLowerCase(Locale.ROOT).startsWith("pass");
+
+        List<Object> rows = new ArrayList<>();
+        rows.addAll(badgeRows(info, damage, passive));
+        rows.add("");
+
+        String headline = headline(damage, grants, info);
+        if (headline != null) {
+            rows.add(new Big(headline));
+            rows.add("");
+        }
+
+        List<String> body = descriptionLines(icon, desc, loreStats);
+        if (!body.isEmpty()) {
+            rows.add(new BarLine(TooltipGlyphs.Bar.DESCRIPTION, null, null));
+            for (String line : body) rows.add(railed("description", line));
+            rows.add("");
+        }
+
+        if (damage != null && damage.base() > 0) {
+            rows.add(new BarLine(TooltipGlyphs.Bar.DAMAGE,
+                    damage.repeats() > 1 ? "&f" + damage.repeats() + "x&8 hits" : null,
+                    critText(damage)));
+            rows.add(railed("damage", elementRow(damage)));
+            rows.add(railed("damage", baseRow(damage)));
+            rows.add("");
+        }
+
+        String cost = costRow(skill, level);
+        if (cost != null) {
+            rows.add(new BarLine(TooltipGlyphs.Bar.COST, null, null));
+            rows.add(railed("cost", cost));
+            rows.add("");
+        }
+
+        if (skill != null) {
+            boolean learned = playerLevel > 0;
+            rows.add(new BarLine(TooltipGlyphs.Bar.SKILL, null, learned
+                    ? CHECK + " &7Lv &f" + playerLevel + "&8/" + skill.getMaxLevel()
+                    : CROSS + " &cNot socketed"));
+            if (!learned) {
+                rows.add(railed("skill", "&8Socket into " + (passive ? "a passive" : "an active")
+                        + " skill slot using &7/ci"));
             }
-            if (info.typePercent != null) {
-                sb.append(" &7(").append(info.typePercent).append(')');
+            rows.add("");
+        }
+
+        int width = MIN_WIDTH;
+        for (Object row : rows) {
+            if (row instanceof String s) {
+                width = Math.max(width, glyphs.width(s));
+            } else if (row instanceof Big b) {
+                width = Math.max(width, glyphs.width(b.text(), TooltipGlyphs.BIG_CHAR));
             }
         }
-        if (info.form != null && !info.form.isBlank()) {
-            sb.append("  &7").append(info.form);
+
+        List<Component> lore = new ArrayList<>();
+        for (Object row : rows) {
+            if (row instanceof Big b) {
+                lore.add(noShadow(LEGACY.deserialize(b.text()).font(FONT_BIG)));
+            } else if (row instanceof BarLine bl) {
+                lore.add(noShadow(LEGACY.deserialize(barText(bl, width)).font(FONT_BODY)));
+            } else {
+                String s = (String) row;
+                lore.add(s.isEmpty() ? Component.empty()
+                        : noShadow(LEGACY.deserialize(s).font(FONT_BODY)));
+            }
+        }
+        if (!lore.isEmpty() && lore.get(lore.size() - 1).equals(Component.empty())) {
+            lore.remove(lore.size() - 1);
+        }
+        lore.add(Component.empty());
+        lore.add(footer);
+        return lore;
+    }
+
+    /** A bar of the given width with its insets drawn on top of it. */
+    private String barText(BarLine line, int width) {
+        StringBuilder sb = new StringBuilder("&f");
+        sb.append(glyphs.bar(line.bar(), width));
+        int cursor = width;
+        if (line.after() != null) {
+            int x = glyphs.advance(line.bar().left()) + LABEL_GAP;
+            sb.append(TooltipGlyphs.pad(x - cursor)).append(line.after());
+            cursor = x + glyphs.width(line.after());
+        }
+        if (line.right() != null) {
+            int x = width - glyphs.width(line.right()) - RIGHT_GAP;
+            sb.append(TooltipGlyphs.pad(x - cursor)).append(line.right());
         }
         return sb.toString();
     }
 
     /**
-     * Stats section. With a connected skill: its icon-lore stat lines
-     * (damage classifier, crit info), walked buff multipliers and numeric
-     * damage, then live mana/cooldown and the viewer's level. Without one:
-     * the gem's own hand-written stat lines, verbatim.
+     * Badge pills — rarity, gem, active/passive, boost tags, element — wrapped
+     * onto extra lines rather than pushing the tooltip wide.
      */
-    private List<String> statsBlock(Skill skill, List<String> iconStats,
-                                    List<String> loreStats, int playerLevel) {
-        if (skill == null) return new ArrayList<>(loreStats);
+    private List<String> badgeRows(Info info, SkillMath.Damage damage, boolean passive) {
+        List<Character> pills = new ArrayList<>();
+        Character rarity = info.rarity == null ? null
+                : RARITY_PILL.get(info.rarity.toLowerCase(Locale.ROOT));
+        pills.add(rarity == null ? RARITY_PILL.get("common") : rarity);
+        pills.add(GEM_PILL);
+        pills.add(passive ? PILL_PASSIVE : PILL_ACTIVE);
 
-        boolean learned = playerLevel > 0;
-        int level = Math.max(1, playerLevel);
-        List<String> out = new ArrayList<>();
-
-        boolean numericDamageShown = false;
-        for (String line : iconStats) {
-            out.add(line);
-            String plain = PLAIN.serialize(LEGACY.deserialize(line)).trim();
-            if (plain.matches("(?i)^damage\\s*:\\s*[0-9.]+.*")) numericDamageShown = true;
+        List<String> tags = new ArrayList<>();
+        if (damage != null) {
+            for (SkillMath.Tag tag : damage.tags()) tags.add(tag.name());
         }
-
-        for (String line : buffLines(skill, level)) {
-            out.add(line);
+        if (info.type != null) {                 // sigils/buffs carry it as Type
+            String type = info.type.toLowerCase(Locale.ROOT);
+            if (TAG_PILL.containsKey(type) && !tags.contains(type)) tags.add(type);
         }
+        for (String tag : tags) {
+            Character pill = TAG_PILL.get(tag);
+            if (pill != null) pills.add(pill);
+        }
+        Character element = ELEMENT_PILL.get(damage != null ? damage.element()
+                : info.type == null ? "" : info.type.toLowerCase(Locale.ROOT));
+        if (element != null) pills.add(element);
 
-        if (!numericDamageShown) {
-            double[] dmg = bestMechanic(skill, "damage", level);
-            if (dmg != null && dmg[0] > 0) {
-                String line = "&2Damage: &f" + fmt(dmg[0]);
-                if (dmg[1] > 1.5) line += " &8x" + Math.round(dmg[1]);
-                out.add(line);
+        List<String> rows = new ArrayList<>();
+        StringBuilder row = new StringBuilder();
+        int used = 0;
+        for (char pill : pills) {
+            int step = glyphs.advance(pill) + (row.isEmpty() ? 0 : 3);
+            if (!row.isEmpty() && used + step > MIN_WIDTH) {
+                rows.add("&f" + row);
+                row.setLength(0);
+                used = 0;
+                step = glyphs.advance(pill);
             }
+            if (!row.isEmpty()) row.append(TooltipGlyphs.pad(3));
+            row.append(pill);
+            used += step;
         }
-        double[] heal = bestMechanic(skill, "heal", level);
-        if (heal != null && heal[0] > 0) {
-            String line = "&2Heals: &a" + fmt(heal[0]);
-            if (heal[1] > 1.5) line += " &8x" + Math.round(heal[1]);
-            out.add(line);
-        }
+        if (!row.isEmpty()) rows.add("&f" + row);
+        return rows;
+    }
 
+    /**
+     * The one number a player wants: what this gem hits them for right now,
+     * every hit counted. Passives headline their granted attribute instead.
+     */
+    private String headline(SkillMath.Damage damage, List<SkillMath.Grant> grants,
+                            Info info) {
+        if (damage != null && damage.effective() > 0) {
+            String element = damage.element();
+            String pretty = element.substring(0, 1).toUpperCase(Locale.ROOT)
+                    + element.substring(1);
+            // The number carries the element's color too — a lightning gem should
+            // read as lightning at a glance, not as white text with a colored word.
+            String color = config.gemTypeColor(element);
+            String line = color + fmt(damage.effective()) + " " + pretty + " Damage";
+            if (damage.repeats() > 1) line += " &8x" + damage.repeats();
+            return line;
+        }
+        if (!grants.isEmpty()) {
+            SkillMath.Grant grant = grants.get(0);
+            String color = ATTR_COLOR.getOrDefault(grant.attribute(), "&e");
+            return "&f+" + fmt(grant.amount()) + " " + color + pretty(grant.attribute());
+        }
+        return null;
+    }
+
+    /** "PHYSICAL (100%)  PROJECTILE (100%)" — element share, then tag weights. */
+    private String elementRow(SkillMath.Damage damage) {
+        StringBuilder sb = new StringBuilder("&f");
+        Character element = ELEMENT_PILL.get(damage.element());
+        if (element != null) {
+            sb.append(element).append(TooltipGlyphs.pad(2))
+              .append(config.gemTypeColor(damage.element())).append("(100%)");
+        }
+        for (SkillMath.Tag tag : damage.tags()) {
+            Character pill = TAG_PILL.get(tag.name());
+            if (pill == null) continue;
+            sb.append(TooltipGlyphs.pad(7)).append("&f").append(pill)
+              .append(TooltipGlyphs.pad(2))
+              .append("&f(").append(fmt(tag.weight() * 100)).append("%)");
+        }
+        return sb.toString();
+    }
+
+    /** "base 4   multiplier x1.5" — the flat term and the whole-damage scalar. */
+    private String baseRow(SkillMath.Damage damage) {
+        String line = "&7base &f" + fmt(damage.base());
+        if (Math.abs(damage.multiplier() - 1.0) > 0.005) {
+            line += TooltipGlyphs.pad(8) + "&7multiplier &6x" + fmt(damage.multiplier());
+        }
+        return line;
+    }
+
+    private String critText(SkillMath.Damage damage) {
+        if (damage.critChance() <= 0) return null;
+        return "&7Crit &6" + fmt(damage.critChance()) + "%&8 / &6+"
+                + fmt((damage.critDamage() - 1) * 100) + "%";
+    }
+
+    /** "MANA 5 (+2/lvl)  COOLDOWN 3s", or null when the skill costs nothing. */
+    private String costRow(Skill skill, int level) {
+        if (skill == null) return null;
+        StringBuilder sb = new StringBuilder("&f");
         double mana = safe(() -> skill.getManaCost(level));
         if (mana > 0) {
+            sb.append(PILL_MANA).append(TooltipGlyphs.pad(2)).append("&f").append(fmt(mana));
             double scale = safe(() -> skill.getManaCost(level + 1)) - mana;
-            out.add("&2Mana: &b" + fmt(mana) + (scale > 0 ? " &8(+" + fmt(scale) + "/lvl)" : ""));
+            if (scale > 0) sb.append(" &8(+").append(fmt(scale)).append("/lvl)");
         }
-        double cd = safe(() -> skill.getCooldown(level));
-        if (cd > 0) out.add("&2Cooldown: &f" + fmt(cd) + "s");
+        double cooldown = safe(() -> skill.getCooldown(level));
+        if (cooldown > 0) {
+            if (sb.length() > 2) sb.append(TooltipGlyphs.pad(8));
+            sb.append("&f").append(PILL_COOLDOWN).append(TooltipGlyphs.pad(2))
+              .append("&f").append(fmt(cooldown)).append("s");
+        }
+        return sb.length() > 2 ? sb.toString() : null;
+    }
 
-        if (learned) {
-            out.add("&2Level: &f" + playerLevel + "&8/" + skill.getMaxLevel());
-        } else if (!out.isEmpty()) {
-            out.add("&8Socket into a skill slot to unlock");
+    /**
+     * Flavor text. The Fabled skill's own lore body wins over the gem item's
+     * hand-written copy, minus its "Type:" line — the tags are pills now — and
+     * minus stat lines, which the sections below render from the skill itself.
+     */
+    private List<String> descriptionLines(IconDetails icon, List<String> desc,
+                                          List<String> loreStats) {
+        List<String> source = icon.body().isEmpty() ? desc : icon.body();
+        List<String> out = new ArrayList<>();
+        for (String line : source) {
+            String plain = PLAIN.serialize(LEGACY.deserialize(line)).trim();
+            if (plain.isEmpty()) continue;
+            if (plain.toLowerCase(Locale.ROOT).startsWith("type")) continue;
+            if (STAT_LABEL.matcher(plain).matches()) continue;
+            out.add(line);
+        }
+        if (out.isEmpty()) {
+            for (String line : loreStats) {
+                String plain = PLAIN.serialize(LEGACY.deserialize(line)).trim();
+                if (!plain.isEmpty()) out.add(line);
+            }
         }
         return out;
+    }
+
+    private String railed(String section, String line) {
+        Character rail = RAIL.get(section);
+        return (rail == null ? "" : "&f" + rail + TooltipGlyphs.pad(3)) + line;
+    }
+
+    private static String pretty(String attribute) {
+        String name = attribute.startsWith("base_")
+                ? attribute.substring("base_".length()) : attribute;
+        return name.isEmpty() ? name
+                : name.substring(0, 1).toUpperCase(Locale.ROOT) + name.substring(1);
     }
 
     /**
@@ -471,47 +692,6 @@ final class GemTooltip {
     }
 
     // ─── component-tree walk ────────────────────────────────────────────────
-
-    /**
-     * "Boost" lines for Buff mechanics that multiply a Divinity damage type,
-     * e.g. Frost Bomb's DIVINITY_damage_ice x1.5.
-     */
-    private List<String> buffLines(Skill skill, int level) {
-        List<String> out = new ArrayList<>();
-        if (!(skill instanceof DynamicSkill dyn)) return out;
-        try {
-            for (EffectComponent root : rootComponents(dyn)) {
-                collectBuffs(root, level, 0, out);
-            }
-        } catch (Throwable ignored) {
-            // walk is best-effort flair
-        }
-        return out;
-    }
-
-    private void collectBuffs(EffectComponent comp, int level, int depth, List<String> out) {
-        if (comp == null || depth > MAX_WALK_DEPTH) return;
-        try {
-            if ("buff".equalsIgnoreCase(comp.getKey())) {
-                Settings s = comp.getSettings();
-                String type = s.getString("type", "");
-                String modifier = s.getString("modifier", "");
-                double value = s.getAttr("value", level, 0);
-                if ("multiplier".equalsIgnoreCase(modifier)
-                        && type.toLowerCase(Locale.ROOT).startsWith("divinity_damage_")
-                        && value > 0 && Math.abs(value - 1.0) > 0.001) {
-                    String elem = type.substring("divinity_damage_".length()).toLowerCase(Locale.ROOT);
-                    String pretty = elem.substring(0, 1).toUpperCase(Locale.ROOT) + elem.substring(1);
-                    out.add("&2Multiplier: " + config.gemTypeColor(elem) + pretty + " Damage &6x" + fmt(value));
-                }
-            }
-        } catch (Throwable ignored) {
-            // skip malformed component
-        }
-        for (EffectComponent child : comp.children) {
-            collectBuffs(child, level, depth + 1, out);
-        }
-    }
 
     /**
      * Largest {@code value} of the given mechanic in the skill's component

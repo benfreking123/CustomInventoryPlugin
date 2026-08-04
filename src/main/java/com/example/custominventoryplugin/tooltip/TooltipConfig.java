@@ -27,6 +27,8 @@ public final class TooltipConfig {
     private final Map<String, String> itemIdOverrides = new HashMap<>();
     private final Map<String, String> materialOverrides = new HashMap<>();
     private final Map<String, String> sources = new HashMap<>();
+    private final Map<String, Catalyst> catalysts = new HashMap<>();
+    private final Map<String, Lootbox> lootboxes = new HashMap<>();
 
     // Derived attribute requirements (Docs/deisgn/tooltips.md). The value is
     // scaled from the item's Divinity level/tier; the attribute is chosen from
@@ -59,6 +61,8 @@ public final class TooltipConfig {
         itemIdOverrides.clear();
         materialOverrides.clear();
         sources.clear();
+        catalysts.clear();
+        lootboxes.clear();
         attrReqTiers.clear();
         attrReqTypes.clear();
         attrReqAttributes.clear();
@@ -111,6 +115,33 @@ public final class TooltipConfig {
                 if (line != null && !line.isBlank()) {
                     sources.put(key.toLowerCase(Locale.ROOT), line);
                 }
+            }
+        }
+
+        ConfigurationSection cats = root.getConfigurationSection("catalysts");
+        if (cats != null) {
+            for (String key : cats.getKeys(false)) {
+                ConfigurationSection c = cats.getConfigurationSection(key);
+                if (c == null) continue;
+                catalysts.put(key.toLowerCase(Locale.ROOT), new Catalyst(
+                        c.getString("rarity", "common"),
+                        c.getStringList("actions"),
+                        c.getString("headline", ""),
+                        c.getString("accepts", ""),
+                        c.getStringList("body")));
+            }
+        }
+
+        ConfigurationSection boxes = root.getConfigurationSection("lootboxes");
+        if (boxes != null) {
+            for (String key : boxes.getKeys(false)) {
+                ConfigurationSection b = boxes.getConfigurationSection(key);
+                if (b == null) continue;
+                lootboxes.put(key.toLowerCase(Locale.ROOT), new Lootbox(
+                        b.getString("rarity", "common"),
+                        b.getString("headline", ""),
+                        b.getStringList("contents"),
+                        b.getString("use", "Right-click to open")));
             }
         }
 
@@ -182,10 +213,17 @@ public final class TooltipConfig {
         if (gemTypeColors.isEmpty()) putDefaultGemTypeColors();
     }
 
-    /** Text-tag colors for skill types with no element pill glyph. */
+    /** Colors for damage elements and for skill types with no element pill. */
     private void putDefaultGemTypeColors() {
+        // The five damage types, matched to their pills in gen-tooltip-assets.py.
+        // Without these every element fell through to grey, so lightning and
+        // fire damage read the same as physical.
+        gemTypeColors.put("physical", "&f");
+        gemTypeColors.put("fire", "&6");
+        gemTypeColors.put("ice", "&b");
+        gemTypeColors.put("lightning", "&e");
+        gemTypeColors.put("chaotic", "&d");
         gemTypeColors.put("sigil", "&6");
-        gemTypeColors.put("energy", "&e");
         gemTypeColors.put("movement", "&b");
         gemTypeColors.put("melee", "&7");
         gemTypeColors.put("projectile", "&6");
@@ -250,6 +288,30 @@ public final class TooltipConfig {
         if (materialName == null) return null;
         String s = materialOverrides.get(materialName.toUpperCase(Locale.ROOT));
         return (s == null || s.isBlank()) ? null : s;
+    }
+
+    /**
+     * A lootbox's authored copy; see the `lootboxes:` block.
+     *
+     * `contents` is what the box can actually pay out, kept in step with
+     * Skript-shared/scripts/lootboxes/lootcrates.sk — the script is the real
+     * source of truth, and tt-check compares the two.
+     */
+    public record Lootbox(String rarity, String headline, List<String> contents,
+                          String use) { }
+
+    public Lootbox lootboxForItemId(String itemId) {
+        if (itemId == null || itemId.isBlank()) return null;
+        return lootboxes.get(itemId.toLowerCase(Locale.ROOT));
+    }
+
+    /** A Smithy catalyst's authored copy; see the `catalysts:` block. */
+    public record Catalyst(String rarity, List<String> actions, String headline,
+                           String accepts, List<String> body) { }
+
+    public Catalyst catalystForItemId(String itemId) {
+        if (itemId == null || itemId.isBlank()) return null;
+        return catalysts.get(itemId.toLowerCase(Locale.ROOT));
     }
 
     public String sourceForItemId(String itemId) {

@@ -1,5 +1,5 @@
 name: CustomInventoryPlugin
-version: '1.14.1'
+version: 1.16.2
 main: com.example.custominventoryplugin.CustomInventoryPlugin
 api-version: '1.21'
 description: Bespoke Gear Menu + cross-server backpacks (LuckPerms-gated, MariaDB-backed).
