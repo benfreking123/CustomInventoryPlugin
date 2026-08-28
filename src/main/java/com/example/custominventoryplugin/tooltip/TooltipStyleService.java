@@ -1,6 +1,7 @@
 package com.example.custominventoryplugin.tooltip;
 
 import io.papermc.paper.datacomponent.DataComponentTypes;
+import io.papermc.paper.datacomponent.item.CustomModelData;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -32,7 +33,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Stamps {@code minecraft:tooltip_style} from Divinity tier (or config overrides),
+ * Stamps {@code minecraft:tooltip_style} (and the matching slot-glow key in
+ * {@code minecraft:custom_model_data}) from Divinity tier (or config overrides),
  * reflows Divinity lore into the Wynn-style page-1 layout (badge row + Level Req,
  * attribute icon strip, stat totals, compact set line), and manages the F-key
  * page cycle: 1 = stats, 2 = set details (when the item belongs to a set),
@@ -135,9 +137,20 @@ public final class TooltipStyleService {
      */
     private static final Pattern NATIVE_TYPE = Pattern.compile(
             "^[^A-Za-z▸]*(Physical|Fire|Ice|Lightning|Chaotic)\\s+(Damage|Defense):\\s*(.+?)\\s*$");
+    /** Stamped weapon headline, e.g. "5 Physical Damage" / "5-7 Physical Damage". */
+    private static final Pattern WEAPON_DAMAGE_HEADLINE = Pattern.compile(
+            "^[+-]?[0-9]+([.,][0-9]+)?(-[0-9]+([.,][0-9]+)?)?\\s+.+Damage\\s*$");
     /** Native Divinity item stat (stats.yml formats all use the ▸ marker). */
     private static final Pattern NATIVE_STAT = Pattern.compile(
             "^▸\\s*([^:]+):\\s*(.+?)\\s*$");
+    /**
+     * Divinity's handedness line ({@code item_stats/hand.yml}). It carries no ▸
+     * marker, so without this it falls through to misc and prints at the very
+     * bottom — below the requirement chips, where nobody reads it. Handedness
+     * decides whether you can use your off hand at all, so it belongs with the
+     * weapon's headline.
+     */
+    private static final Pattern HAND_LINE = Pattern.compile("^Hand:\\s*(.+?)\\s*$");
     /** "Player Level: N+" requirement line (USER_LEVEL). */
     private static final Pattern PLAYER_LEVEL_LINE = Pattern.compile(
             "^\\S*\\s*Player Level: (\\d+)\\+?\\s*$");
@@ -159,6 +172,7 @@ public final class TooltipStyleService {
     private final NamespacedKey levelReqKey;
     private final NamespacedKey badgeBaseKey;
     private final NamespacedKey divinityItemIdKey;
+    private final NamespacedKey weaponDamageAttrKey;
     /** Set when a fogus_loren tag was re-synced during the current stamp pass
      *  (main thread only) — forces a meta save even if the lore text tied. */
     private boolean tagsDirty;
@@ -186,6 +200,12 @@ public final class TooltipStyleService {
         this.levelReqKey = new NamespacedKey(plugin, "tt_level_req");
         this.badgeBaseKey = new NamespacedKey(plugin, "tt_badge_base");
         this.divinityItemIdKey = new NamespacedKey("divinity", "item_id");
+        // Deliberately named like a Divinity roll. The main-hand grant path
+        // picks up any key called item_fabled_attr_* regardless of namespace,
+        // so writing it under our own namespace with their key name means the
+        // weapon's damage travels the ledger, the revoke and the audit with no
+        // separate plumbing — and no second code path that can leak points.
+        this.weaponDamageAttrKey = new NamespacedKey(plugin, "item_fabled_attr_stat_weapon_damage");
         hookDivinity();
     }
 
@@ -249,6 +269,7 @@ public final class TooltipStyleService {
         String stylePath = resolveStylePath(stack, itemId);
         if (stylePath != null) {
             applyStyle(stack, stylePath);
+            applyGlow(stack, stylePath);
         }
 
         ensureDetailPage(stack, itemId);
@@ -376,7 +397,7 @@ public final class TooltipStyleService {
 
         // ── classify Divinity-format lines ──
         java.util.Set<String> fabledBases = fabledPlainTexts(pdc);
-        Component badgeRow = null, setLine = null;
+        Component badgeRow = null, setLine = null, handRow = null;
         List<String[]> nativeDamage = new ArrayList<>();   // {color, name, value}
         List<String[]> nativeDefense = new ArrayList<>();
         List<String[]> nativeStats = new ArrayList<>();    // {color, name, value}
@@ -403,6 +424,11 @@ public final class TooltipStyleService {
                 continue;
             }
             if (trimmed.startsWith("Set: ")) { setLine = line; continue; }
+            Matcher hand = HAND_LINE.matcher(trimmed);
+            if (hand.matches()) {
+                handRow = bodyLine("&8" + hand.group(1));
+                continue;
+            }
             String noSuffix = TOTAL_SUFFIX.matcher(trimmed).replaceFirst("");
             if (fabledBases.contains(noSuffix)) {
                 fabled.add(fabledLine(meta, legacy, noSuffix));
@@ -444,8 +470,10 @@ public final class TooltipStyleService {
         if (weapon) {
             nativeDamage.sort((a, b) -> Double.compare(valueMagnitude(b[2]), valueMagnitude(a[2])));
             String[] main = nativeDamage.get(0);
+            stampWeaponDamage(pdc, main[2]);
             out.add(Component.empty());
-            out.add(bigLine("&f" + main[2] + " " + main[0] + main[1]));
+            out.add(weaponDamageLine("&f" + main[2] + " " + main[0] + main[1]));
+            if (handRow != null) out.add(handRow);
             pairs = nativeDamage.subList(1, nativeDamage.size());
             if (!pairs.isEmpty()) out.add(iconPairs(pairs));
             for (String[] st : nativeStats) {
@@ -536,6 +564,18 @@ public final class TooltipStyleService {
                 lore.remove(i);
                 changed = true;
                 continue;
+            } else if (WEAPON_DAMAGE_HEADLINE.matcher(bare).matches()) {
+                // Backfill for weapons that already exist. layoutV3 never
+                // revisits an item once it is styled, so without this every
+                // sword currently in a chest would have no stat_weapon_damage
+                // and would quietly fall back to the Value Set floor of 4.
+                changed |= stampWeaponDamage(pdc, bare);
+                // Migration, now pointing the other way. 1.18.2 rewrote this
+                // headline into the default font so Fabled could regex it out
+                // of the lore; every weapon stamped since is carrying that
+                // small line. Promote it so existing weapons catch up instead
+                // of looking different from ones dropped after this build.
+                if (!usesBigFont(lore.get(i))) fresh = weaponDamageLineFromPlain(bare);
             } else if (plain.contains("Press F") || containsGlyph(plain, DOT_ON, DOT_OFF)) {
                 fresh = buildFooter(1, totalPages(pdc)).font(FONT_BODY);
             } else {
@@ -732,6 +772,77 @@ public final class TooltipStyleService {
                 .append(bodyLine("&f" + rail + pad(2)))
                 .append(line)
                 .build());
+    }
+
+    /**
+     * Record the weapon's damage roll on the item as a Fabled attribute, so
+     * skills can read a number instead of reading the tooltip.
+     *
+     * This is what finally settles the oldest recurring bug in the tooltip.
+     * Strike, Charge and Rising Slash got their weapon damage through Fabled's
+     * {@code Value Lore}, which calls {@code ItemMeta.getLore()} and regexes
+     * the result — so the damage a sword did depended on how this class chose
+     * to render a line of text. Any styling change silently zeroed it, which is
+     * exactly what happened when the headline moved to the {@code tower:big}
+     * font and serialized to something the regex could not match. Every fix
+     * since has been a truce between "make it look right" and "keep it
+     * parseable". Writing the number down ends the negotiation: the lore is
+     * free to be anything, because nothing reads it any more.
+     *
+     * The low end of a {@code 5-7} roll is used because that is what the old
+     * regex captured, so weapons hit for the same amount after this change as
+     * before it.
+     */
+    private boolean stampWeaponDamage(PersistentDataContainer pdc, String value) {
+        Matcher m = FIRST_NUMBER.matcher(value);
+        if (!m.find()) return false;
+        try {
+            int damage = (int) Math.round(Double.parseDouble(m.group()));
+            if (damage <= 0) {
+                // giveAttribute is skipped for non-positive values further down
+                // the chain, so a stale key here would never be revoked.
+                if (!pdc.has(weaponDamageAttrKey, PersistentDataType.INTEGER)) return false;
+                pdc.remove(weaponDamageAttrKey);
+                return true;
+            }
+            Integer existing = pdc.get(weaponDamageAttrKey, PersistentDataType.INTEGER);
+            if (existing != null && existing == damage) return false;
+            pdc.set(weaponDamageAttrKey, PersistentDataType.INTEGER, damage);
+            return true;
+        } catch (NumberFormatException ignored) {
+            // Unparseable roll: leave whatever is there. The skills keep their
+            // Value Set floor, which is the same fallback as an unstamped item.
+            return false;
+        }
+    }
+
+    /**
+     * Weapon damage headline, back in the {@code tower:big} font it had before
+     * 1.18.2 — the same treatment armor's Base line never lost.
+     *
+     * It was demoted to the default font because Fabled's {@code Value Lore}
+     * had to be able to regex it out of {@code ItemMeta.getLore()}, and a
+     * custom font serializes to something that read empty. That constraint is
+     * gone: the damage now travels as {@code stat_weapon_damage} on the item,
+     * so no skill parses this line and it is free to be styled again.
+     */
+    private Component weaponDamageLine(String legacy) {
+        return bigLine(legacy);
+    }
+
+    private Component weaponDamageLineFromPlain(String plain) {
+        int sp = plain.indexOf(' ');
+        if (sp <= 0) return weaponDamageLine("&f" + plain);
+        return weaponDamageLine("&f" + plain.substring(0, sp) + " &4" + plain.substring(sp + 1));
+    }
+
+    private static boolean usesBigFont(Component c) {
+        if (c == null) return false;
+        if (FONT_BIG.equals(c.font())) return true;
+        for (Component child : c.children()) {
+            if (usesBigFont(child)) return true;
+        }
+        return false;
     }
 
     private Component bigLine(String legacy) {
@@ -1332,13 +1443,42 @@ public final class TooltipStyleService {
         return "Requires " + req.getValue() + " " + display;
     }
 
+    /**
+     * Same units as {@code %stats_total_<attr>%} ({@code stats-papi.sk}):
+     * {@code attr_* × 5 + base_* + stat_*}. Gear reqs are stored as
+     * {@code base_strength:N} meaning N Strength on the character sheet.
+     * {@code attr_*} is AP from {@code /attr} (each point is worth 5 on the
+     * sheet); {@code base_*} is gear. Summing the keys 1:1 made 1 invested AP
+     * look like 1 Strength, so a level-4 sword asking for 4 stayed locked
+     * while the HUD already showed 6.
+     */
+    private static final int ATTR_AP_WEIGHT = 5;
+
     private int playerAttribute(Player player, String attrKey) {
         try {
             PlayerData data = Fabled.getData(player);
-            return data == null ? 0 : data.getAttribute(attrKey);
+            if (data == null) return 0;
+            String family = primaryFamily(attrKey);
+            if (family == null) return data.getAttribute(attrKey);
+            return data.getAttribute("attr_" + family) * ATTR_AP_WEIGHT
+                    + data.getAttribute("base_" + family)
+                    + data.getAttribute("stat_" + family);
         } catch (Throwable t) {
             return 0;
         }
+    }
+
+    /** {@code strength} from {@code base_strength} / {@code attr_strength} / {@code stat_strength}. */
+    private static String primaryFamily(String attrKey) {
+        if (attrKey == null || attrKey.isBlank()) return null;
+        String k = attrKey.toLowerCase(Locale.ROOT);
+        for (String prefix : new String[]{"attr_", "base_", "stat_"}) {
+            if (k.startsWith(prefix)) k = k.substring(prefix.length());
+        }
+        for (String name : ATTR_ORDER) {
+            if (name.equals(k)) return name;
+        }
+        return null;
     }
 
     /** RPG level from Fabled (vanilla XP level is not the RPG level). */
@@ -1428,6 +1568,36 @@ public final class TooltipStyleService {
             // setData can leave ItemMeta stale for PDC writes that follow
         } catch (Throwable t) {
             plugin.getLogger().log(Level.WARNING, "tooltip_style stamp failed (" + stylePath + "): " + t.getMessage());
+        }
+    }
+
+    /**
+     * The pack's slot glow, keyed off the same style path as the tooltip frame so
+     * the two can never disagree. Since 1.21.4 custom_model_data is four parallel
+     * lists, and gems and crate keys range_dispatch their 3D models off
+     * {@code floats} — so the component is read back and only {@code strings[0]}
+     * replaced, never rebuilt from scratch.
+     */
+    private void applyGlow(ItemStack stack, String stylePath) {
+        if (!config.isGlowEnabled()) return;
+        try {
+            String value = stylePath.toLowerCase(Locale.ROOT);
+            CustomModelData existing = stack.getData(DataComponentTypes.CUSTOM_MODEL_DATA);
+            List<String> strings = existing == null ? List.of() : existing.strings();
+            if (!strings.isEmpty() && value.equals(strings.get(0))) return;
+
+            List<String> next = new ArrayList<>(strings);
+            if (next.isEmpty()) next.add(value); else next.set(0, value);
+
+            CustomModelData.Builder builder = CustomModelData.customModelData().addStrings(next);
+            if (existing != null) {
+                builder.addFloats(existing.floats())
+                        .addFlags(existing.flags())
+                        .addColors(existing.colors());
+            }
+            stack.setData(DataComponentTypes.CUSTOM_MODEL_DATA, builder);
+        } catch (Throwable t) {
+            plugin.getLogger().log(Level.WARNING, "custom_model_data glow stamp failed (" + stylePath + "): " + t.getMessage());
         }
     }
 

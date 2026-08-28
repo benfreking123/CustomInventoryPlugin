@@ -7,6 +7,7 @@ import com.example.custominventoryplugin.config.ConfigManager;
 import com.example.custominventoryplugin.data.BackpackData;
 import com.example.custominventoryplugin.inventory.BackpackInventory;
 import com.example.custominventoryplugin.inventory.GearInventory;
+import com.example.custominventoryplugin.inventory.StatsPanel;
 import java.util.Map;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -87,6 +88,18 @@ implements Listener {
     }
 
     private void handleNormalClick(InventoryClickEvent event, Player player) {
+        if (event.getInventory().getHolder() instanceof GearInventory gear) {
+            // Stats panel tab strip. Checked before the backpack buttons because
+            // the tab strip is painted last and therefore wins the slot.
+            String tab = StatsPanel.tabAtSlot(event.getRawSlot());
+            if (tab != null) {
+                event.setCancelled(true);
+                StatsPanel.toggleTo(this.plugin, player, tab);
+                gear.refreshStatsTabs();
+                return;
+            }
+        }
+
         // Backpack icon button? Open the backpack.
         if (event.getInventory().getHolder() instanceof GearInventory gear) {
             String bpId = gear.getBackpackIdAtSlot(event.getRawSlot());

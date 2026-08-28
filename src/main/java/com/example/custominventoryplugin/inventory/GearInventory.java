@@ -32,6 +32,7 @@ public class GearInventory implements InventoryHolder {
     private final ConfigManager configManager;
     private final CustomInventoryPlugin plugin;
     private final NamespacedKey backpackButtonKey;
+    private final NamespacedKey statsTabKey;
 
     /** slot position → backpack id, for quick click lookup */
     private final Map<Integer, String> backpackButtonSlots = new HashMap<>();
@@ -41,6 +42,7 @@ public class GearInventory implements InventoryHolder {
         this.configManager = configManager;
         this.plugin = plugin;
         this.backpackButtonKey = new NamespacedKey(plugin, BACKPACK_BUTTON_KEY);
+        this.statsTabKey = new NamespacedKey(plugin, StatsPanel.TAB_BUTTON_KEY);
         this.inventory = Bukkit.createInventory(this, 54,
                 com.example.custominventoryplugin.groupdrop.Text.nexoBackground(GEAR_BG_GLYPH, GEAR_BG_SHIFT));
         this.updateInventory();
@@ -100,6 +102,12 @@ public class GearInventory implements InventoryHolder {
                     BackpackIconBuilder.build(def, used, backpackButtonKey));
             this.backpackButtonSlots.put(def.getCiSlot(), def.getId());
         }
+
+        // 5. Stats panel tab strip, top-right row. Painted last so a stray
+        // ci-slot in backpacks.yml can never bury the panel controls — if
+        // someone points a backpack at 5-8 the tab wins and the backpack is the
+        // thing that visibly disappears, which is the easier bug to spot.
+        StatsPanel.decorate(this.inventory, this.player, this.statsTabKey);
     }
 
     /** Builds the placeholder shown in a permission-locked skill-gem slot. */
@@ -125,4 +133,11 @@ public class GearInventory implements InventoryHolder {
     public Player getPlayer() { return this.player; }
 
     public NamespacedKey getBackpackButtonKey() { return backpackButtonKey; }
+
+    public NamespacedKey getStatsTabKey() { return statsTabKey; }
+
+    /** Repaints just the tab strip, so the glint follows the active tab. */
+    public void refreshStatsTabs() {
+        StatsPanel.decorate(this.inventory, this.player, this.statsTabKey);
+    }
 }

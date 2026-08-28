@@ -23,6 +23,8 @@ public final class TooltipConfig {
     private final JavaPlugin plugin;
     private boolean enabled = true;
     private String namespace = "tower";
+    /** Also stamp the style path into custom_model_data strings[0] (slot glow). */
+    private boolean glowEnabled = true;
     private final Map<String, String> tierToStyle = new HashMap<>();
     private final Map<String, String> itemIdOverrides = new HashMap<>();
     private final Map<String, String> materialOverrides = new HashMap<>();
@@ -77,6 +79,7 @@ public final class TooltipConfig {
         if (root == null) {
             enabled = true;
             namespace = "tower";
+            glowEnabled = true;
             putDefaults();
             gemIdPrefixes.addAll(List.of("gem_", "passive_"));
             putDefaultGemTypeColors();
@@ -85,6 +88,7 @@ public final class TooltipConfig {
 
         enabled = root.getBoolean("enabled", true);
         namespace = root.getString("namespace", "tower");
+        glowEnabled = root.getBoolean("glow", true);
 
         ConfigurationSection tiers = root.getConfigurationSection("tiers");
         if (tiers != null) {
@@ -272,10 +276,21 @@ public final class TooltipConfig {
 
     public boolean isEnabled() { return enabled; }
     public String getNamespace() { return namespace; }
+    public boolean isGlowEnabled() { return glowEnabled; }
 
     public String styleForTier(String tierId) {
         if (tierId == null || tierId.isBlank()) return null;
         return tierToStyle.get(tierId.toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * The distinct style names, sorted. These are exactly the values stamped into
+     * custom_model_data strings[0], so they are also the set of glow layers the
+     * pack has to switch between. Sorted because the pack the glow ends up in has
+     * to be byte-identical across backends.
+     */
+    public List<String> glowTiers() {
+        return tierToStyle.values().stream().distinct().sorted().toList();
     }
 
     public String styleForItemId(String itemId) {

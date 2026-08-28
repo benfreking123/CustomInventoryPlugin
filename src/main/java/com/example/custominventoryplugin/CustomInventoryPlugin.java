@@ -27,6 +27,7 @@ import com.example.custominventoryplugin.data.LuckPermsBridge;
 import com.example.custominventoryplugin.data.PlayerGearData;
 import com.example.custominventoryplugin.listeners.DeathLootListener;
 import com.example.custominventoryplugin.listeners.HarvestPickupListener;
+import com.example.custominventoryplugin.listeners.InfiniteArrowsListener;
 import com.example.custominventoryplugin.pickup.PickupPipeline;
 import com.example.custominventoryplugin.settings.BackpackSettingsCache;
 import com.example.custominventoryplugin.groupdrop.GroupDropCommand;
@@ -35,11 +36,20 @@ import com.example.custominventoryplugin.groupdrop.GroupDropData;
 import com.example.custominventoryplugin.groupdrop.GroupDropListener;
 import com.example.custominventoryplugin.groupdrop.RewardService;
 import com.example.custominventoryplugin.listeners.ArmorAttributeListener;
+import com.example.custominventoryplugin.listeners.AttributeAuditService;
 import com.example.custominventoryplugin.listeners.BackpackListener;
 import com.example.custominventoryplugin.listeners.BackpackPickupListener;
 import com.example.custominventoryplugin.listeners.InventoryListener;
+import com.example.custominventoryplugin.listeners.MainHandAttributeListener;
+import com.example.custominventoryplugin.party.NoOpPartyService;
+import com.example.custominventoryplugin.party.PartiesPartyService;
+import com.example.custominventoryplugin.party.PartyGuiListener;
+import com.example.custominventoryplugin.party.PartyLifecycleListener;
+import com.example.custominventoryplugin.party.PartyService;
+import com.example.custominventoryplugin.party.PartySettingsStore;
 import com.example.custominventoryplugin.placeholders.BackpackPlaceholders;
 import com.example.custominventoryplugin.tooltip.TooltipConfig;
+import com.example.custominventoryplugin.tooltip.ItemGlowPackListener;
 import com.example.custominventoryplugin.tooltip.TooltipListener;
 import com.example.custominventoryplugin.tooltip.TooltipStyleService;
 import org.bukkit.entity.Player;
@@ -77,6 +87,8 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
     private TooltipStyleService tooltipStyleService;
     private AutoLootConfig autoLootConfig;
     private LootEffectService lootEffectService;
+    private PartyService partyService;
+    private PartySettingsStore partySettingsStore;
 
     @Override
     public void onEnable() {
@@ -116,12 +128,41 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
         // ─── tooltip frames (Divinity tier → minecraft:tooltip_style) ─────
         this.tooltipConfig = new TooltipConfig(this);
         this.tooltipStyleService = new TooltipStyleService(this, this.tooltipConfig);
+        // Built before the tooltip listener so its 5-tick hand sweep can double
+        // as the reconciler for main-hand Fabled attributes.
+        MainHandAttributeListener mainHandAttributes =
+                new MainHandAttributeListener(this, this.configManager);
+        getServer().getPluginManager().registerEvents(mainHandAttributes, this);
         getServer().getPluginManager().registerEvents(
-                new TooltipListener(this, this.tooltipStyleService), this);
+                new TooltipListener(this, this.tooltipStyleService, mainHandAttributes), this);
+        // The other half of the tier glow: TooltipListener stamps the tier onto the
+        // item, this writes the layer the pack draws for it. Guarded because Nexo
+        // is a soft-depend — without it there is no pack to hook and the class
+        // references types that would not resolve.
+        if (getServer().getPluginManager().isPluginEnabled("Nexo")) {
+            try {
+                getServer().getPluginManager().registerEvents(
+                        new ItemGlowPackListener(this, this.tooltipConfig), this);
+            } catch (Throwable t) {
+                getLogger().warning("tier glow: Nexo present but its pack API did not "
+                        + "resolve, slot glow disabled (" + t + ")");
+            }
+        }
         // Fabled attr bonuses for vanilla armor (rings-style PDC read) + tooltip
         // restamps on attribute change so "(total)" figures stay fresh.
         getServer().getPluginManager().registerEvents(
                 new ArmorAttributeListener(this, this.configManager), this);
+
+        // Startup sweep. /reload and plugin-manager reloads bring players back
+        // without a PlayerJoinEvent, so the per-login audit never runs for them
+        // and a reload is exactly when the ledger is most likely to have been
+        // left mid-write. Delayed a second for the same reason as the login
+        // pass: player data loads asynchronously.
+        getServer().getScheduler().runTaskLater(this, () -> {
+            for (Player online : getServer().getOnlinePlayers()) {
+                AttributeAuditService.warnOnDrift(online, getLogger(), "startup");
+            }
+        }, 20L);
 
         // ─── AutoLoot (server drop manager: rarity glow/burst + routing) ──
         this.autoLootConfig = new AutoLootConfig(this);
@@ -145,11 +186,33 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
                 this, this.backpackConfig, this.backpackData, this.settingsCache,
                 bpListener.getMarkerKey(), this.autoLootConfig);
         getServer().getPluginManager().registerEvents(new BackpackPickupListener(this, this.pickupPipeline), this);
+        // ─── party roster (AlessioDP Parties softdepend) ───────────────────
+        this.partySettingsStore = new PartySettingsStore(this, this.database);
+        if (getServer().getPluginManager().getPlugin("Parties") != null) {
+            try {
+                PartiesPartyService pps = new PartiesPartyService(this, this.partySettingsStore);
+                this.partyService = pps;
+                getServer().getPluginManager().registerEvents(
+                        new PartyLifecycleListener(this.partySettingsStore), this);
+                getServer().getPluginManager().registerEvents(
+                        new PartyGuiListener(this, this.partyService), this);
+                getLogger().info("Parties detected — party loot + GUI enabled.");
+            } catch (Throwable t) {
+                this.partyService = new NoOpPartyService();
+                getLogger().warning("Parties present but API failed to bind (" + t + ") — party features disabled.");
+            }
+        } else {
+            this.partyService = new NoOpPartyService();
+            getLogger().warning("Parties NOT detected — party loot/GUI disabled.");
+        }
+
         getServer().getPluginManager().registerEvents(
-                new DeathLootListener(this, this.pickupPipeline, this.autoLootConfig, this.lootEffectService), this);
+                new DeathLootListener(this, this.pickupPipeline, this.autoLootConfig,
+                        this.lootEffectService, this.partyService), this);
         getServer().getPluginManager().registerEvents(
                 new com.example.custominventoryplugin.autoloot.GroundGlowListener(this.autoLootConfig, this.lootEffectService), this);
         getServer().getPluginManager().registerEvents(new HarvestPickupListener(this, this.pickupPipeline), this);
+        getServer().getPluginManager().registerEvents(new InfiniteArrowsListener(this), this);
         getServer().getPluginManager().registerEvents(this, this);
 
         // ─── group drops (choose-your-reward) ─────────────────────────────
@@ -201,6 +264,7 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        if (this.partyService != null) this.partyService.shutdown();
         if (this.collectionsListener != null) this.collectionsListener.stopSweepTask();
         if (this.database != null) this.database.stop();
         getLogger().info("CustomInventoryPlugin disabled.");
@@ -229,12 +293,20 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
     public TooltipStyleService getTooltipStyleService() { return this.tooltipStyleService; }
     public AutoLootConfig  getAutoLootConfig()   { return this.autoLootConfig; }
     public LootEffectService getLootEffectService() { return this.lootEffectService; }
+    public PartyService    getPartyService()     { return this.partyService; }
 
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         PlayerGearData.loadPlayerData(player.getUniqueId());
         if (this.settingsCache != null) this.settingsCache.load(player.getUniqueId());
+        // Runs a tick late: BetterHud re-applies its saved .users/ HUD list
+        // during login, so clearing on the join event itself can be overwritten.
+        getServer().getScheduler().runTaskLater(this, () -> {
+            if (player.isOnline()) {
+                com.example.custominventoryplugin.inventory.StatsPanel.resetOnJoin(this, player);
+            }
+        }, 20L);
     }
 
     @EventHandler
@@ -242,5 +314,6 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
         Player player = event.getPlayer();
         PlayerGearData.unloadPlayerData(player.getUniqueId());
         if (this.settingsCache != null) this.settingsCache.unload(player.getUniqueId());
+        com.example.custominventoryplugin.inventory.StatsPanel.forget(player.getUniqueId());
     }
 }

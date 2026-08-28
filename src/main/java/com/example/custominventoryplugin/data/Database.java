@@ -204,10 +204,20 @@ public class Database {
                 "  PRIMARY KEY (player_uuid, counter_key)" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
+            // ─── party settings (v1.20.0) ──────────────────────────────────
+            // Per-party loot mode keyed on AlessioDP Party.getId(). Cross-server
+            // because every backend shares thetower MariaDB.
+            s.executeUpdate(
+                "CREATE TABLE IF NOT EXISTS cip_party_settings (" +
+                "  party_id   CHAR(36) PRIMARY KEY," +
+                "  loot_mode  VARCHAR(24) NOT NULL DEFAULT 'ROUND_ROBIN'," +
+                "  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
             plugin.getLogger().info("Schema verified: cip_player_gear, cip_player_slot_attrs, cip_player_slot_perms, "
                     + "cip_player_backpack, cip_player_pickup_settings, cip_player_backpack_settings, "
                     + "cip_groupdrop_def, cip_groupdrop_option, cip_groupdrop_grant, cip_groupdrop_claim, "
-                    + "cip_bestiary_kills, cip_counters");
+                    + "cip_bestiary_kills, cip_counters, cip_party_settings");
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.example.custominventoryplugin.tooltip;
 
 import com.destroystokyo.paper.event.player.PlayerArmorChangeEvent;
+import com.example.custominventoryplugin.listeners.MainHandAttributeListener;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.entity.Item;
@@ -29,10 +30,13 @@ public final class TooltipListener implements Listener {
 
     private final JavaPlugin plugin;
     private final TooltipStyleService service;
+    private final MainHandAttributeListener mainHandAttributes;
 
-    public TooltipListener(JavaPlugin plugin, TooltipStyleService service) {
+    public TooltipListener(JavaPlugin plugin, TooltipStyleService service,
+                           MainHandAttributeListener mainHandAttributes) {
         this.plugin = plugin;
         this.service = service;
+        this.mainHandAttributes = mainHandAttributes;
         // Catch-all for unmet items that reach a hand via paths the events below
         // don't cover (auto-pickup, /give, inventory drag). Runs every 5 ticks.
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::sweepHands, 20L, 5L);
@@ -173,11 +177,19 @@ public final class TooltipListener implements Listener {
      * Move any unmet held item out of both hands into the backpack/inventory
      * (dropped only if the inventory is full). Non-worn gear only — armor is
      * gated by wearing, not holding, so you can still carry it in hand.
+     *
+     * The same pass reconciles Fabled attributes for BOTH hands. That work
+     * belongs to a loop over every online player's hands, and this is the one
+     * we already run; a second timer would only double the cost of walking the
+     * same items. Order matters: evict first, so an item pulled out of the hand
+     * for an unmet requirement is gone before the reconcile reads the hand and
+     * would otherwise grant its bonus for a few ticks.
      */
     private void sweepHands() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
             evictIfUnmet(player, true);
             evictIfUnmet(player, false);
+            if (mainHandAttributes != null) mainHandAttributes.reconcile(player);
         }
     }
 

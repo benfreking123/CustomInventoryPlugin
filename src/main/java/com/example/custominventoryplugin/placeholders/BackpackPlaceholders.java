@@ -34,6 +34,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *   %customip_quests_done% / _total / _pct / _bar
  *   %customip_quests_floor1_done% / _total / _pct / _bar   (any floor key)
  *
+ * Stats panel:
+ *   %customip_stats_tab%                 — offense | defense | utility | off
+ *
  * Falls back to "0" / "-" for unknown ids so HUDs don't break.
  */
 public class BackpackPlaceholders extends PlaceholderExpansion {
@@ -62,6 +65,13 @@ public class BackpackPlaceholders extends PlaceholderExpansion {
     @Override
     public String onRequest(OfflinePlayer player, @NotNull String params) {
         if (player == null) return "";
+
+        // Which stats-panel tab is open. Every stats HUD gates itself on this in
+        // a HUD-level `conditions:` block, so it is read once per player per
+        // tick — keep it allocation-free and ahead of the heavier lookups.
+        if (params.equalsIgnoreCase("stats_tab")) {
+            return com.example.custominventoryplugin.inventory.StatsPanel.tab(player.getUniqueId());
+        }
 
         String compendium = compendiumValue(player, params.toLowerCase(Locale.ROOT));
         if (compendium != null) return compendium;

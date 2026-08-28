@@ -67,6 +67,7 @@ public class BackpackListener implements Listener {
     public static boolean isForbidden(ItemStack item, NamespacedKey markerKey) {
         if (item == null || item.getType().isAir()) return false;
         if (FORBIDDEN_MATERIALS.contains(item.getType())) return true;
+        if (InfiniteArrowsListener.isDummy(item)) return true;
         if (item.hasItemMeta() && item.getItemMeta() != null) {
             return item.getItemMeta().getPersistentDataContainer().has(markerKey, PersistentDataType.BYTE);
         }

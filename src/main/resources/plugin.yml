@@ -1,5 +1,5 @@
 name: CustomInventoryPlugin
-version: 1.16.2
+version: ${project.version}
 main: com.example.custominventoryplugin.CustomInventoryPlugin
 api-version: '1.21'
 description: Bespoke Gear Menu + cross-server backpacks (LuckPerms-gated, MariaDB-backed).
@@ -9,8 +9,16 @@ depend: [Fabled]
 # makes our HIGHEST EntityDeathEvent handler run after Divinity's DropManager
 # (HIGHEST) but before its LootManager (MONITOR) loot-box wrapping. Vault is
 # optional and only used for capacity-tier purchases. MythicMobs enables
-# bestiary kill tracking.
-softdepend: [LuckPerms, PlaceholderAPI, Divinity, Vault, MythicMobs, ProtocolLib]
+# bestiary kill tracking. Nexo has to be listed for the tier-glow pack hook to
+# register at all — we check isPluginEnabled("Nexo") on enable, which is only
+# true if Nexo already went first.
+#
+# BetterHealthBar is listed for ordering only — we call nothing in it. Adding
+# Nexo above put us ahead of it in Bukkit's topological sort, which pushed it
+# from 28th to 30th and left Nexo importing betterhealthbar.zip a second before
+# the plugin had finished enabling. Bars stopped rendering with no error in any
+# log. Keep it here so we always enable after it, however the graph is sorted.
+softdepend: [LuckPerms, PlaceholderAPI, Divinity, Vault, MythicMobs, ProtocolLib, Nexo, BetterHealthBar, Parties]
 load: POSTWORLD
 
 commands:
@@ -20,7 +28,7 @@ commands:
     permission: custominventory.addstrength
   ci:
     description: Custom Inventory commands — opens the Gear Menu
-    usage: /<command> [reload|reset <player> [confirm]]
+    usage: /<command> [reload|reset <player> [confirm]|stats <tab>]
     permission: custominventory.use
   bp:
     description: Open one of your backpacks. /bp lists what you can open.

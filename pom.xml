@@ -4,7 +4,7 @@
 
     <groupId>com.example</groupId>
     <artifactId>custominventoryplugin</artifactId>
-    <version>1.16.2</version>
+    <version>1.21.0</version>
     <packaging>jar</packaging>
     <name>CustomInventoryPlugin</name>
     <description>Bespoke Gear Menu + cross-server backpacks (LuckPerms-gated, MariaDB-backed).</description>
@@ -82,6 +82,29 @@
             <systemPath>${project.basedir}/lib/mythicmobs.jar</systemPath>
         </dependency>
 
+        <!-- AlessioDP Parties (party roster / loot / GUI) - local JAR -->
+        <dependency>
+            <groupId>com.alessiodp.parties</groupId>
+            <artifactId>parties</artifactId>
+            <version>3.2.18</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/parties.jar</systemPath>
+        </dependency>
+
+        <!-- Nexo (NexoPostPackGenerateEvent + the team.unnamed.creative pack model
+             it shades, unrelocated) - local JAR.
+             repo.nexomc.com only publishes some releases and 1.23.3 is not one of
+             them, and the whole point of this dependency is the shaded creative
+             API, whose surface moves between Nexo builds. So compile against the
+             exact jar the backends run. -->
+        <dependency>
+            <groupId>com.nexomc</groupId>
+            <artifactId>nexo</artifactId>
+            <version>1.23.3</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/nexo.jar</systemPath>
+        </dependency>
+
         <!-- HikariCP — connection pooling for MariaDB -->
         <dependency>
             <groupId>com.zaxxer</groupId>
@@ -103,6 +126,13 @@
             <artifactId>mariadb-java-client</artifactId>
             <version>3.3.3</version>
         </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -121,6 +151,12 @@
                 <configuration>
                     <release>21</release>
                 </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
             </plugin>
 
             <!-- Shade HikariCP + MariaDB JDBC into the JAR, relocated to avoid conflicts -->

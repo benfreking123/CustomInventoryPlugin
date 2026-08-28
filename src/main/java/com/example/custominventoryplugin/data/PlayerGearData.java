@@ -106,6 +106,16 @@ public class PlayerGearData {
         }
     }
 
+    /**
+     * Whether this player's slot rows are in the cache. Callers that hand out a
+     * revocable grant (Fabled attribute points) must check this first: the row
+     * that records the grant is the only way to take it back, so granting while
+     * the ledger is missing makes the grant permanent.
+     */
+    public static boolean isLoaded(UUID uuid) {
+        return uuid != null && loadedPlayers.contains(uuid);
+    }
+
     public static void unloadPlayerData(UUID uuid) {
         if (uuid == null || !loadedPlayers.contains(uuid)) return;
         playerGear.remove(uuid);
@@ -213,6 +223,23 @@ public class PlayerGearData {
         } catch (SQLException e) {
             logWarning("setPlayerSlotAttributes failed for " + uuid + ":" + slotId, e);
         }
+    }
+
+    /**
+     * Every slot id this player currently has a ledger row for. The audit walks
+     * this rather than the configured slot list, because the rows that matter
+     * are exactly the ones nothing owns any more — a slot that was renamed or
+     * removed from settings.yml still holds live Fabled points.
+     */
+    public static Set<String> getLedgerSlotIds(UUID uuid) {
+        Map<String, Map<String, Integer>> slotMap = playerSlotAttributes.get(uuid);
+        return slotMap == null ? new HashSet<>() : new HashSet<>(slotMap.keySet());
+    }
+
+    /** Slot ids holding a stored gear item (the gear-menu slots), for the audit. */
+    public static Set<String> getGearSlotIds(UUID uuid) {
+        Map<String, ItemStack> gear = playerGear.get(uuid);
+        return gear == null ? new HashSet<>() : new HashSet<>(gear.keySet());
     }
 
     public static Map<String, Integer> getPlayerSlotAttributes(UUID uuid, String slotId) {

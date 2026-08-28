@@ -264,6 +264,9 @@ item-types:
 tooltip:
   enabled: true
   namespace: tower
+  # Also write the style path to custom_model_data strings[0], which the pack
+  # draws as a tier-coloured glow behind the item in its slot.
+  glow: true
   tiers:
     common: common
     uncommon: uncommon
