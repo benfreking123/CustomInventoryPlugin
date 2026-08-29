@@ -27,7 +27,7 @@ import java.util.List;
  * /groupdrop option &lt;id&gt; &lt;slot&gt; label &lt;text...&gt;
  * /groupdrop option &lt;id&gt; &lt;slot&gt; seticon          (uses held item)
  * /groupdrop token give &lt;id&gt; [player] [amount]
- * /groupdrop reset &lt;id&gt; &lt;player&gt;           clear a player's claim
+ * /groupdrop reset &lt;id|all&gt; &lt;player&gt;      clear one claim, or every claim they hold
  * /groupdrop export &lt;id|all&gt; · import &lt;id|all&gt; · reload
  */
 public class GroupDropCommand implements CommandExecutor, TabCompleter {
@@ -270,11 +270,20 @@ public class GroupDropCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean cmdReset(CommandSender sender, String[] args) {
-        if (args.length < 3) { sender.sendMessage(Text.c("&7/groupdrop reset <id> <player>")); return true; }
-        if (!config.exists(args[1])) { sender.sendMessage(Text.c("&cUnknown group drop: &f" + args[1])); return true; }
+        if (args.length < 3) { sender.sendMessage(Text.c("&7/groupdrop reset <id|all> <player>")); return true; }
+        boolean all = args[1].equalsIgnoreCase("all");
+        if (!all && !config.exists(args[1])) {
+            sender.sendMessage(Text.c("&cUnknown group drop: &f" + args[1]));
+            return true;
+        }
         Player target = Bukkit.getPlayerExact(args[2]);
         java.util.UUID uuid = target != null ? target.getUniqueId()
                 : Bukkit.getOfflinePlayer(args[2]).getUniqueId();
+        if (all) {
+            int n = data.resetAllClaims(uuid);
+            sender.sendMessage(Text.c("&aReset &f" + n + "&a group drop claim(s) for &f" + args[2]));
+            return true;
+        }
         data.resetClaim(uuid, args[1]);
         sender.sendMessage(Text.c("&aReset claim for &f" + args[2] + "&a on &b" + args[1].toLowerCase()));
         return true;
@@ -325,7 +334,7 @@ public class GroupDropCommand implements CommandExecutor, TabCompleter {
             String p = args[1].toLowerCase();
             if (sub.equals("open")) {
                 for (Player pl : Bukkit.getOnlinePlayers()) if (pl.getName().toLowerCase().startsWith(p)) out.add(pl.getName());
-            } else if (sub.equals("export") || sub.equals("import")) {
+            } else if (sub.equals("export") || sub.equals("import") || sub.equals("reset")) {
                 if ("all".startsWith(p)) out.add("all");
                 for (GroupDrop g : config.all()) if (g.getId().startsWith(p)) out.add(g.getId());
             } else if (sub.equals("token")) {

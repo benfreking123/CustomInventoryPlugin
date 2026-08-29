@@ -248,4 +248,22 @@ public class GroupDropData {
             plugin.getLogger().log(Level.WARNING, "GroupDrop resetClaim failed", e);
         }
     }
+
+    /**
+     * Clear every claim a player holds, across all groups. A player wipe has to
+     * work without naming the groups: the group list lives in this table and
+     * grows, so any caller enumerating ids by hand silently stops covering new
+     * ones the day someone adds a group. Returns the number of rows removed.
+     */
+    public int resetAllClaims(UUID uuid) {
+        try (Connection c = database.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "DELETE FROM cip_groupdrop_claim WHERE player_uuid=?")) {
+            ps.setString(1, uuid.toString());
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.WARNING, "GroupDrop resetAllClaims failed", e);
+            return 0;
+        }
+    }
 }
