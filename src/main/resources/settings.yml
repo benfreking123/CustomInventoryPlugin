@@ -406,3 +406,21 @@ tooltip:
       resource: '&a'
       dynamic: '&d'
       passive: '&d'
+
+# Critical hits for basic (non-skill) attacks on swords and bows.
+#
+# Applied inside Divinity's damage pipeline, not Fabled's, because Fabled runs
+# first at HIGHEST priority and would only multiply the vanilla part of a hit
+# rather than the elemental damage Divinity adds afterwards.
+#
+# The roll reads Fabled's crit attributes (base_crit_chance, stat_crit_chance,
+# stat_crit_damage, plus the _attack / _projectile variants), so rings and gems
+# feed basic attacks the same way they feed skills. Wands are excluded: they
+# cast skills, which roll their own crit.
+basic-attack-crit:
+  enabled: true
+  # Flat chance in percent before any attribute adds to it.
+  base-chance: 2.0
+  # Damage multiplier on a crit before stat_crit_damage adds to it.
+  base-multiplier: 1.5
+  message: '&c&lCRITICAL!'

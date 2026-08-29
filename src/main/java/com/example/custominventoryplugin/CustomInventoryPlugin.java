@@ -40,6 +40,7 @@ import com.example.custominventoryplugin.listeners.AttributeAuditService;
 import com.example.custominventoryplugin.listeners.BackpackListener;
 import com.example.custominventoryplugin.listeners.BackpackPickupListener;
 import com.example.custominventoryplugin.listeners.InventoryListener;
+import com.example.custominventoryplugin.listeners.BasicAttackCritListener;
 import com.example.custominventoryplugin.listeners.MainHandAttributeListener;
 import com.example.custominventoryplugin.party.NoOpPartyService;
 import com.example.custominventoryplugin.party.PartiesPartyService;
@@ -152,6 +153,18 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
         // restamps on attribute change so "(total)" figures stay fresh.
         getServer().getPluginManager().registerEvents(
                 new ArmorAttributeListener(this, this.configManager), this);
+
+        // Basic-attack crit. Guarded because Divinity is a soft-depend and the
+        // listener references its event types, which would not resolve without it.
+        if (getServer().getPluginManager().isPluginEnabled("Divinity")) {
+            try {
+                getServer().getPluginManager().registerEvents(
+                        new BasicAttackCritListener(this.configManager), this);
+            } catch (Throwable t) {
+                getLogger().warning("basic-attack crit: Divinity present but its damage "
+                        + "event API did not resolve, weapon crit disabled (" + t + ")");
+            }
+        }
 
         // Startup sweep. /reload and plugin-manager reloads bring players back
         // without a PlayerJoinEvent, so the per-login audit never runs for them

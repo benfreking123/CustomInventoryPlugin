@@ -33,6 +33,13 @@ public class ConfigManager {
     private int defaultPassiveSlots;
     /** Ticks before AutoPick vacuums owned ground drops (visual delay). */
     private int autopickupGroundDelayTicks;
+    // Basic-attack crit. Applied inside Divinity's damage pipeline rather than
+    // Fabled's trigger, because Fabled runs first at HIGHEST and would only
+    // multiply the vanilla portion of the hit. See BasicAttackCritListener.
+    private boolean critEnabled;
+    private double critBaseChance;
+    private double critBaseMultiplier;
+    private String critMessage;
 
     public ConfigManager(Plugin plugin) {
         this.plugin = plugin;
@@ -55,6 +62,10 @@ public class ConfigManager {
             this.defaultActiveSlots = Math.max(0, this.config.getInt("skill-slots.default-active", 3));
             this.defaultPassiveSlots = Math.max(0, this.config.getInt("skill-slots.default-passive", 2));
             this.autopickupGroundDelayTicks = Math.max(1, this.config.getInt("autopickup.ground-delay-ticks", 15));
+            this.critEnabled = this.config.getBoolean("basic-attack-crit.enabled", true);
+            this.critBaseChance = this.config.getDouble("basic-attack-crit.base-chance", 2.0);
+            this.critBaseMultiplier = this.config.getDouble("basic-attack-crit.base-multiplier", 1.5);
+            this.critMessage = this.config.getString("basic-attack-crit.message", "&c&lCRITICAL!");
             this.armorSlots.clear();
             this.armorSlots.put("helmet", this.config.getInt("armor-slots.helmet", 0));
             this.armorSlots.put("chestplate", this.config.getInt("armor-slots.chestplate", 9));
@@ -141,6 +152,22 @@ public class ConfigManager {
 
     public int getDefaultPassiveSlots() {
         return this.defaultPassiveSlots;
+    }
+
+    public boolean isCritEnabled() {
+        return this.critEnabled;
+    }
+
+    public double getCritBaseChance() {
+        return this.critBaseChance;
+    }
+
+    public double getCritBaseMultiplier() {
+        return this.critBaseMultiplier;
+    }
+
+    public String getCritMessage() {
+        return this.critMessage;
     }
 
     public int getAutopickupGroundDelayTicks() {

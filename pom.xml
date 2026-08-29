@@ -4,7 +4,7 @@
 
     <groupId>com.example</groupId>
     <artifactId>custominventoryplugin</artifactId>
-    <version>1.21.0</version>
+    <version>1.22.0</version>
     <packaging>jar</packaging>
     <name>CustomInventoryPlugin</name>
     <description>Bespoke Gear Menu + cross-server backpacks (LuckPerms-gated, MariaDB-backed).</description>
@@ -71,6 +71,24 @@
             <version>1.0.4</version>
             <scope>system</scope>
             <systemPath>${project.basedir}/lib/fabled.jar</systemPath>
+        </dependency>
+
+        <!-- Divinity API (DivinityDamageEvent, for basic-attack crit) - local JAR -->
+        <dependency>
+            <groupId>studio.magemonkey</groupId>
+            <artifactId>divinity</artifactId>
+            <version>1.0.2</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/divinity.jar</systemPath>
+        </dependency>
+
+        <!-- CodexCore - Divinity's event superclass (ICancellableEvent) - local JAR -->
+        <dependency>
+            <groupId>studio.magemonkey</groupId>
+            <artifactId>codex</artifactId>
+            <version>1.2.0</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/codex.jar</systemPath>
         </dependency>
 
         <!-- MythicMobs API (bestiary kill tracking) - local JAR -->
