@@ -22,6 +22,11 @@ public final class TooltipConfig {
 
     private final JavaPlugin plugin;
     private boolean enabled = true;
+    // Mirrors of CIP's basic-attack-crit block, so the weapon tooltip can state
+    // the baseline crit without reaching across into ConfigManager.
+    private boolean critEnabled = true;
+    private double critBaseChance = 2.0;
+    private double critBaseMultiplier = 1.5;
     private String namespace = "tower";
     /** Also stamp the style path into custom_model_data strings[0] (slot glow). */
     private boolean glowEnabled = true;
@@ -75,6 +80,12 @@ public final class TooltipConfig {
 
         File settingsFile = new File(plugin.getDataFolder(), "settings.yml");
         FileConfiguration settings = YamlConfiguration.loadConfiguration(settingsFile);
+        // Read before the `tooltip` early-return: the crit line is driven by the
+        // same numbers BasicAttackCritListener uses, and must stay truthful even
+        // on a config with no tooltip section.
+        critEnabled = settings.getBoolean("basic-attack-crit.enabled", true);
+        critBaseChance = settings.getDouble("basic-attack-crit.base-chance", 2.0);
+        critBaseMultiplier = settings.getDouble("basic-attack-crit.base-multiplier", 1.5);
         ConfigurationSection root = settings.getConfigurationSection("tooltip");
         if (root == null) {
             enabled = true;
@@ -277,6 +288,9 @@ public final class TooltipConfig {
     public boolean isEnabled() { return enabled; }
     public String getNamespace() { return namespace; }
     public boolean isGlowEnabled() { return glowEnabled; }
+    public boolean isCritEnabled() { return critEnabled; }
+    public double getCritBaseChance() { return critBaseChance; }
+    public double getCritBaseMultiplier() { return critBaseMultiplier; }
 
     public String styleForTier(String tierId) {
         if (tierId == null || tierId.isBlank()) return null;

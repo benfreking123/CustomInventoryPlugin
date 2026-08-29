@@ -151,6 +151,21 @@ public final class TooltipStyleService {
      * weapon's headline.
      */
     private static final Pattern HAND_LINE = Pattern.compile("^Hand:\\s*(.+?)\\s*$");
+    /**
+     * Our own baseline-crit line, e.g. {@code Crit 2% · x1.5}. Matched so a
+     * restamp replaces it rather than stacking a second copy, and so weapons
+     * stamped before this build can be backfilled. The digit after "Crit "
+     * keeps it from colliding with a Fabled bonus line like "Crit Chance: +5".
+     */
+    private static final Pattern CRIT_LINE = Pattern.compile("^Crit \\d.*$");
+    /**
+     * The handedness line in either shape: Divinity's raw {@code Hand: Two-handed}
+     * on a fresh drop, or the bare {@code Two-handed} that {@link #HAND_LINE}
+     * reduces it to once stamped. Used only to place the crit line below it, so
+     * a renamed hand stat costs line order, not correctness.
+     */
+    private static final Pattern ANY_HAND_LINE = Pattern.compile(
+            "^(?:Hand:\\s*)?(?:One|Two)-handed$", Pattern.CASE_INSENSITIVE);
     /** "Player Level: N+" requirement line (USER_LEVEL). */
     private static final Pattern PLAYER_LEVEL_LINE = Pattern.compile(
             "^\\S*\\s*Player Level: (\\d+)\\+?\\s*$");
@@ -349,7 +364,7 @@ public final class TooltipStyleService {
         boolean changed = false;
         changed |= stripAccessoryHandLine(itemId, lore);
         changed |= extractSetBlock(pdc, lore);
-        Boolean gear = layoutV3(meta, pdc, lore, viewer);
+        Boolean gear = layoutV3(meta, pdc, lore, viewer, stack.getType());
         if (gear == null) {
             // not gear (currency, crystals, …): legacy incremental flow
             changed |= mergeLevelReqAndAttrStrip(pdc, lore, viewer);
@@ -387,11 +402,11 @@ public final class TooltipStyleService {
     // are refreshed. Returns null when the item has no gear content at all.
 
     private Boolean layoutV3(ItemMeta meta, PersistentDataContainer pdc,
-                             List<Component> lore, Player viewer) {
+                             List<Component> lore, Player viewer, Material material) {
         tagsDirty = false;
         for (Component c : lore) {
             if (containsGlyphRange(PLAIN.serialize(c), HDR_MIN, HDR_MAX)) {
-                return refreshV3(meta, pdc, lore, viewer);
+                return refreshV3(meta, pdc, lore, viewer, material);
             }
         }
 
@@ -474,27 +489,35 @@ public final class TooltipStyleService {
             out.add(Component.empty());
             out.add(weaponDamageLine("&f" + main[2] + " " + main[0] + main[1]));
             if (handRow != null) out.add(handRow);
+            if (config.isCritEnabled() && isCritWeapon(material)) out.add(critLine());
             pairs = nativeDamage.subList(1, nativeDamage.size());
             if (!pairs.isEmpty()) out.add(iconPairs(pairs));
             for (String[] st : nativeStats) {
                 out.add(bodyLine(st[0] + st[1] + ": &f" + st[2]));
             }
         } else {
-            if (!nativeStats.isEmpty()) {
-                nativeStats.sort((a, b) -> Double.compare(valueMagnitude(b[2]), valueMagnitude(a[2])));
-                String[] main = nativeStats.get(0);
-                out.add(Component.empty());
-                out.add(bigLine("&f" + main[2] + " " + main[0] + main[1]));
-                for (int i = 1; i < nativeStats.size(); i++) {
-                    String[] st = nativeStats.get(i);
-                    out.add(bodyLine(st[0] + st[1] + ": &f" + st[2]));
-                }
-            }
+            // Armor headlines its typed defense — the analog of the weapon's
+            // damage roll. The defense-types pool is gated 1/1, so every piece
+            // has exactly one and it is the number the mitigation formula reads.
+            // The Divinity native used to hold this slot, but that is a 1-of-4
+            // lottery (Dodge / Max Health / Health Regen / Block) and Block can
+            // never fire while nothing generates a shield, so the biggest line
+            // on the item was often the one that mattered least.
             pairs = nativeDefense;
             if (!pairs.isEmpty()) {
+                pairs.sort((a, b) -> Double.compare(valueMagnitude(b[2]), valueMagnitude(a[2])));
+                String[] main = pairs.get(0);
                 out.add(Component.empty());
-                out.add(bodyLine("&f" + HDR_DEFENSE));
-                out.add(railed(RAIL_DEFENSE, iconPairs(pairs)));
+                out.add(bigLine("&f" + main[2] + " " + main[0] + main[1]));
+                List<String[]> rest = pairs.subList(1, pairs.size());
+                if (!rest.isEmpty()) {
+                    out.add(bodyLine("&f" + HDR_DEFENSE));
+                    out.add(railed(RAIL_DEFENSE, iconPairs(rest)));
+                }
+            }
+            nativeStats.sort((a, b) -> Double.compare(valueMagnitude(b[2]), valueMagnitude(a[2])));
+            for (String[] st : nativeStats) {
+                out.add(bodyLine(st[0] + st[1] + ": &f" + st[2]));
             }
         }
 
@@ -531,7 +554,7 @@ public final class TooltipStyleService {
      *  stamps in place — old flat chip rows become stacked cells, the old
      *  standalone "✔ Level 8" line is deleted (the bar owns it now). */
     private Boolean refreshV3(ItemMeta meta, PersistentDataContainer pdc,
-                              List<Component> lore, Player viewer) {
+                              List<Component> lore, Player viewer, Material material) {
         boolean changed = false;
         for (int i = lore.size() - 1; i >= 0; i--) {
             String plain = PLAIN.serialize(lore.get(i));
@@ -576,6 +599,11 @@ public final class TooltipStyleService {
                 // small line. Promote it so existing weapons catch up instead
                 // of looking different from ones dropped after this build.
                 if (!usesBigFont(lore.get(i))) fresh = weaponDamageLineFromPlain(bare);
+                // Backfill the crit line onto weapons stamped before it existed,
+                // and keep it current if the configured numbers change. Sits
+                // after the hand line, which is the line right below the
+                // headline when Divinity gave the weapon one.
+                changed |= syncCritLine(lore, i, material);
             } else if (plain.contains("Press F") || containsGlyph(plain, DOT_ON, DOT_OFF)) {
                 fresh = buildFooter(1, totalPages(pdc)).font(FONT_BODY);
             } else {
@@ -834,6 +862,66 @@ public final class TooltipStyleService {
         int sp = plain.indexOf(' ');
         if (sp <= 0) return weaponDamageLine("&f" + plain);
         return weaponDamageLine("&f" + plain.substring(0, sp) + " &4" + plain.substring(sp + 1));
+    }
+
+    /**
+     * Whether basic attacks with this material can crit. Deliberately mirrors
+     * {@code BasicAttackCritListener.categoryOf} — if the two ever disagree the
+     * tooltip is lying, so change them together. Wands are absent on purpose:
+     * they cast skills, which roll their own crit.
+     */
+    private static boolean isCritWeapon(Material material) {
+        if (material == null) return false;
+        return material == Material.BOW || material == Material.CROSSBOW
+                || material.name().endsWith("_SWORD");
+    }
+
+    /**
+     * The flat crit every sword and bow gets before attributes. Stated as the
+     * weapon's own line rather than the holder's effective rate, so it cannot
+     * go stale against whatever gems the last viewer happened to be wearing.
+     */
+    private Component critLine() {
+        return bodyLine("&8Crit " + trimZero(config.getCritBaseChance()) + "% · x"
+                + trimZero(config.getCritBaseMultiplier()));
+    }
+
+    /**
+     * Insert, update or remove the crit line that follows a weapon's damage
+     * headline at {@code headlineIndex}. Returns whether the lore changed.
+     */
+    private boolean syncCritLine(List<Component> lore, int headlineIndex, Material material) {
+        int at = headlineIndex + 1;
+        // Step past the handedness line so crit lands under it.
+        if (at < lore.size()
+                && ANY_HAND_LINE.matcher(stripGlyphs(PLAIN.serialize(lore.get(at))).trim()).matches()) {
+            at++;
+        }
+        boolean present = at < lore.size()
+                && CRIT_LINE.matcher(stripGlyphs(PLAIN.serialize(lore.get(at))).trim()).matches();
+        boolean wanted = config.isCritEnabled() && isCritWeapon(material);
+
+        if (!wanted) {
+            if (!present) return false;
+            lore.remove(at);
+            return true;
+        }
+        Component fresh = critLine();
+        if (!present) {
+            lore.add(at, fresh);
+            return true;
+        }
+        if (fresh.equals(lore.get(at))) return false;
+        lore.set(at, fresh);
+        return true;
+    }
+
+    /** 2.0 -> "2", 1.5 -> "1.5". */
+    private static String trimZero(double value) {
+        if (value == Math.floor(value) && !Double.isInfinite(value)) {
+            return String.valueOf((long) value);
+        }
+        return String.valueOf(value);
     }
 
     private static boolean usesBigFont(Component c) {
