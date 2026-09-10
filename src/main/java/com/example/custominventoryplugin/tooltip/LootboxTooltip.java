@@ -81,7 +81,10 @@ final class LootboxTooltip {
         }
         if (!box.use().isBlank()) {
             rows.add("");
-            rows.add("&8" + box.use());
+            // Honour an authored colour in settings.yml (`use: '&e…'`). Bare
+            // text stays yellow — dark-gray was invisible on the tooltip.
+            String use = box.use();
+            rows.add(use.startsWith("&") ? use : "&e" + use);
         }
 
         int width = MIN_WIDTH;

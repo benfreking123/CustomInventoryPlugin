@@ -11,10 +11,13 @@ import com.example.custominventoryplugin.listeners.BackpackListener;
 import com.example.custominventoryplugin.settings.BackpackSettingsCache;
 import com.example.custominventoryplugin.settings.BagSettings;
 import com.example.custominventoryplugin.settings.PlayerPickupSettings;
+import org.bukkit.ChatColor;
 import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -149,14 +152,16 @@ public class PickupPipeline {
                 bagDeposited += dep;
             }
 
-            // Pass B — player inventory.
+            // Pass B — player inventory. Unidentified gear goes into main
+            // storage (slots 9-35) only — vanilla addItem() fills the hotbar
+            // first, which swaps a weapon out mid-fight when a drop lands.
             if (remaining > 0) {
                 ItemStack toAdd = stack.clone();
                 toAdd.setAmount(remaining);
                 int before = remaining;
-                var leftover = player.getInventory().addItem(toAdd);
-                int left = 0;
-                for (ItemStack ls : leftover.values()) left += ls.getAmount();
+                int left = isUnidentified(toAdd)
+                        ? addPreferStorage(player, toAdd)
+                        : leftoverCount(player.getInventory().addItem(toAdd));
                 int placed = before - left;
                 remaining -= placed;
                 absorbed += placed;
@@ -283,6 +288,69 @@ public class PickupPipeline {
                 data.saveAll(uuid, def.getId(), arr, storageSize);
             }
         }
+    }
+
+    /**
+     * Divinity unidentified drops: obfuscated "Undentified Item" (the live
+     * name is misspelled), lore "not known yet", or an item-id starting
+     * {@code unid}.
+     */
+    public boolean isUnidentified(ItemStack stack) {
+        if (stack == null || stack.getType().isAir()) return false;
+        String id = plugin.getTooltipStyleService() != null
+                ? plugin.getTooltipStyleService().resolveItemId(stack) : null;
+        if (id != null && id.toLowerCase().startsWith("unid")) return true;
+        if (!stack.hasItemMeta()) return false;
+        ItemMeta meta = stack.getItemMeta();
+        if (meta.hasDisplayName()) {
+            String name = ChatColor.stripColor(meta.getDisplayName());
+            if (name != null && name.toLowerCase().contains("ndentified")) return true;
+        }
+        if (meta.hasLore()) {
+            for (String line : meta.getLore()) {
+                String plain = ChatColor.stripColor(line);
+                if (plain != null && plain.toLowerCase().contains("not known yet")) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Place into storage slots 9-35 (merge, then empty). Never the hotbar.
+     * Returns the amount that did not fit.
+     */
+    public int addPreferStorage(Player player, ItemStack stack) {
+        if (stack == null || stack.getType().isAir()) return 0;
+        PlayerInventory inv = player.getInventory();
+        int remaining = stack.getAmount();
+        int max = stack.getMaxStackSize();
+
+        for (int i = 9; i <= 35 && remaining > 0; i++) {
+            ItemStack ex = inv.getItem(i);
+            if (ex == null || ex.getType().isAir() || !ex.isSimilar(stack)) continue;
+            int free = max - ex.getAmount();
+            if (free <= 0) continue;
+            int take = Math.min(free, remaining);
+            ex.setAmount(ex.getAmount() + take);
+            inv.setItem(i, ex);
+            remaining -= take;
+        }
+        for (int i = 9; i <= 35 && remaining > 0; i++) {
+            ItemStack ex = inv.getItem(i);
+            if (ex != null && !ex.getType().isAir()) continue;
+            int take = Math.min(max, remaining);
+            ItemStack copy = stack.clone();
+            copy.setAmount(take);
+            inv.setItem(i, copy);
+            remaining -= take;
+        }
+        return remaining;
+    }
+
+    private static int leftoverCount(java.util.Map<Integer, ItemStack> leftover) {
+        int left = 0;
+        for (ItemStack ls : leftover.values()) left += ls.getAmount();
+        return left;
     }
 
     // ─── helpers ──────────────────────────────────────────────────────────

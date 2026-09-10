@@ -37,6 +37,8 @@ public class PlayerGearData {
     private static final Map<UUID, Map<String, ItemStack>> playerGear = new HashMap<>();
     public  static final Map<UUID, Map<String, Map<String, Integer>>> playerSlotAttributes = new HashMap<>();
     private static final Map<UUID, Map<String, String>> playerSlotPerms = new HashMap<>();
+    /** Slots whose gem skill was force-levelled 0 -> 1 for free (see Database free_level). */
+    private static final Map<UUID, Set<String>> playerSlotFreeLevel = new HashMap<>();
     private static final Set<UUID> loadedPlayers = new HashSet<>();
 
     private static Plugin plugin;
@@ -90,12 +92,17 @@ public class PlayerGearData {
 
             // Slot → permission map
             try (PreparedStatement ps = c.prepareStatement(
-                    "SELECT slot_id, permission FROM cip_player_slot_perms WHERE player_uuid=?")) {
+                    "SELECT slot_id, permission, free_level FROM cip_player_slot_perms WHERE player_uuid=?")) {
                 ps.setString(1, uuid.toString());
                 try (ResultSet rs = ps.executeQuery()) {
                     Map<String, String> perms = new HashMap<>();
-                    while (rs.next()) perms.put(rs.getString("slot_id"), rs.getString("permission"));
+                    Set<String> free = new HashSet<>();
+                    while (rs.next()) {
+                        perms.put(rs.getString("slot_id"), rs.getString("permission"));
+                        if (rs.getInt("free_level") != 0) free.add(rs.getString("slot_id"));
+                    }
                     if (!perms.isEmpty()) playerSlotPerms.put(uuid, perms);
+                    if (!free.isEmpty()) playerSlotFreeLevel.put(uuid, free);
                 }
             }
 
@@ -121,6 +128,7 @@ public class PlayerGearData {
         playerGear.remove(uuid);
         playerSlotAttributes.remove(uuid);
         playerSlotPerms.remove(uuid);
+        playerSlotFreeLevel.remove(uuid);
         loadedPlayers.remove(uuid);
         logDebug("Unloaded data for " + uuid);
     }
@@ -285,10 +293,14 @@ public class PlayerGearData {
     public static void setSlotPermission(UUID uuid, String slotId, String permission) {
         if (uuid == null || permission == null) return;
         playerSlotPerms.computeIfAbsent(uuid, k -> new HashMap<>()).put(slotId, permission);
+        // A (re)socket always starts as "paid" — the free level is flagged
+        // separately by setSlotFreeLevel once Fabled has actually been upped.
+        Set<String> free = playerSlotFreeLevel.get(uuid);
+        if (free != null) free.remove(slotId);
         try (Connection c = database.getConnection();
              PreparedStatement ps = c.prepareStatement(
-                     "INSERT INTO cip_player_slot_perms (player_uuid, slot_id, permission) VALUES (?,?,?) " +
-                     "ON DUPLICATE KEY UPDATE permission=VALUES(permission)")) {
+                     "INSERT INTO cip_player_slot_perms (player_uuid, slot_id, permission, free_level) VALUES (?,?,?,0) " +
+                     "ON DUPLICATE KEY UPDATE permission=VALUES(permission), free_level=0")) {
             ps.setString(1, uuid.toString());
             ps.setString(2, slotId);
             ps.setString(3, permission);
@@ -296,6 +308,35 @@ public class PlayerGearData {
         } catch (SQLException e) {
             logWarning("setSlotPermission failed for " + uuid + ":" + slotId, e);
         }
+    }
+
+    /** Mark whether the gem in {@code slotId} owes its level 1 to a free force-up. */
+    public static void setSlotFreeLevel(UUID uuid, String slotId, boolean free) {
+        if (uuid == null || slotId == null) return;
+        if (free) {
+            playerSlotFreeLevel.computeIfAbsent(uuid, k -> new HashSet<>()).add(slotId);
+        } else {
+            Set<String> set = playerSlotFreeLevel.get(uuid);
+            if (set != null) {
+                set.remove(slotId);
+                if (set.isEmpty()) playerSlotFreeLevel.remove(uuid);
+            }
+        }
+        try (Connection c = database.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "UPDATE cip_player_slot_perms SET free_level=? WHERE player_uuid=? AND slot_id=?")) {
+            ps.setInt(1, free ? 1 : 0);
+            ps.setString(2, uuid.toString());
+            ps.setString(3, slotId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            logWarning("setSlotFreeLevel failed for " + uuid + ":" + slotId, e);
+        }
+    }
+
+    public static boolean isSlotFreeLevel(UUID uuid, String slotId) {
+        Set<String> set = playerSlotFreeLevel.get(uuid);
+        return set != null && set.contains(slotId);
     }
 
     public static String getSlotPermission(UUID uuid, String slotId) {
@@ -316,6 +357,11 @@ public class PlayerGearData {
         if (map != null) {
             map.remove(slotId);
             if (map.isEmpty()) playerSlotPerms.remove(uuid);
+        }
+        Set<String> free = playerSlotFreeLevel.get(uuid);
+        if (free != null) {
+            free.remove(slotId);
+            if (free.isEmpty()) playerSlotFreeLevel.remove(uuid);
         }
         try (Connection c = database.getConnection();
              PreparedStatement ps = c.prepareStatement(

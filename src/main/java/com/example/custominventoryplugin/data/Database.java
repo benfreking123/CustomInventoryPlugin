@@ -100,6 +100,15 @@ public class Database {
                 "  permission  VARCHAR(128) NOT NULL," +
                 "  PRIMARY KEY (player_uuid, slot_id)" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            // 1.29.6: free_level=1 marks a slot whose gem was force-levelled
+            // 0 -> 1 by CIP instead of being bought with a skill point. Fabled's
+            // refund hands back cost-by-level, not cost-paid, so any refund of
+            // that skill has to drop the free level first or every socket /
+            // unsocket cycle mints a point. Default 0 = every row that existed
+            // before this column was paid for and refunds normally.
+            s.executeUpdate(
+                "ALTER TABLE cip_player_slot_perms " +
+                "ADD COLUMN IF NOT EXISTS free_level TINYINT(1) NOT NULL DEFAULT 0");
 
             s.executeUpdate(
                 "CREATE TABLE IF NOT EXISTS cip_player_backpack (" +

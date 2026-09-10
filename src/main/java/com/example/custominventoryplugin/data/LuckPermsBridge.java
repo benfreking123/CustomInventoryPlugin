@@ -36,12 +36,14 @@ public class LuckPermsBridge {
     /**
      * Grant a permission node to a player. Idempotent — safe to call repeatedly.
      */
-    public void grant(UUID uuid, String permission) {
+    public java.util.concurrent.CompletableFuture<Void> grant(UUID uuid, String permission) {
         if (!isAvailable()) {
             plugin.getLogger().warning("LuckPerms not available; cannot grant " + permission);
-            return;
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
         }
-        api.getUserManager().modifyUser(uuid, (User user) -> {
+        // Async: LuckPerms applies the node on its own worker and then saves.
+        // Callers that need the node visible to hasPermission() chain on this.
+        return api.getUserManager().modifyUser(uuid, (User user) -> {
             DataMutateResult result = user.data().add(Node.builder(permission).value(true).build());
             if (result.wasSuccessful()) {
                 plugin.getConfigManager().debug("LP grant: " + permission + " → " + uuid);

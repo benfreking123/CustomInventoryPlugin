@@ -51,8 +51,15 @@ commands:
     description: Increment a compendium counter (console hook for Skript/MythicDungeons)
     usage: /<command> <player|uuid> <key> [amount]
     permission: custominventory.counters.admin
+  refund:
+    description: Refund your spent skill points (socketed gems keep their free level)
+    usage: /<command>
+    permission: custominventory.refund
 
 permissions:
+  custominventory.refund:
+    description: Allows refunding spent skill points with /refund
+    default: true
   custominventory.use:
     description: Allows use of the custom inventory commands
     default: true

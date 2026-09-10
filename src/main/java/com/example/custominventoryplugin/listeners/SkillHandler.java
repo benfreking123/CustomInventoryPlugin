@@ -4,7 +4,7 @@ import com.example.custominventoryplugin.CustomInventoryPlugin;
 import com.example.custominventoryplugin.config.ConfigManager;
 import com.example.custominventoryplugin.data.LuckPermsBridge;
 import com.example.custominventoryplugin.data.PlayerGearData;
-import org.bukkit.Bukkit;
+import com.example.custominventoryplugin.skills.GemSkillLevels;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
@@ -12,58 +12,93 @@ import java.util.UUID;
 
 /**
  * Handles skill-gem slots: when a gem is placed, grants the corresponding
- * <code>fabled.skill.&lt;name&gt;</code> permission via LuckPerms (cross-server).
- * When the gem is removed, revokes the permission AND tells Fabled to reset
- * the skill on the player so any existing hotbar bindings / spent points
- * are cleared.
+ * <code>fabled.skill.&lt;name&gt;</code> permission via LuckPerms (cross-server)
+ * and levels the skill 0 -> 1 for free, so the gem is usable the moment it is
+ * socketed. When the gem is removed, revokes the permission and resets the
+ * skill on the player so any existing hotbar bindings / spent points are
+ * cleared — with the free level stripped first so it never refunds a point.
  *
  * Permission node format mirrors the original plugin:
  *   "Bomb Gem"  → fabled.skill.bomb
  *   "Aoe Boost" → fabled.skill.aoe-boost
  *
- * The Fabled reset is dispatched as the console command:
- *   /class forceskill &lt;player&gt; reset &lt;skill name&gt;
- * matching the workflow MyServer's Skript used (-Gems.sk lines 52-56).
- * Without this, Fabled's `needs-permission: true` flag only hides the skill
- * from the tree — it does NOT revoke an already-bound hotbar skill.
+ * The Fabled side (force-up, force-down, refund, the free-level ledger) lives
+ * in {@link GemSkillLevels}; this class only decides <em>when</em>. Without
+ * the reset, Fabled's `needs-permission: true` flag only hides the skill from
+ * the tree — it does NOT revoke an already-bound hotbar skill.
  */
 class SkillHandler {
 
     private final ConfigManager configManager;
     private final CustomInventoryPlugin plugin;
     private final LuckPermsBridge lp;
+    private final GemSkillLevels levels;
 
     public SkillHandler(ConfigManager configManager, CustomInventoryPlugin plugin) {
         this.configManager = configManager;
         this.plugin = plugin;
         this.lp = plugin.getLuckPermsBridge();
+        this.levels = plugin.getGemSkillLevels();
+    }
+
+    /**
+     * The {@code fabled.skill.<name>} node a gem grants, from its display
+     * name ("Bomb Gem" → fabled.skill.bomb), or null if the item is not a gem.
+     */
+    static String permissionFor(ItemStack gear) {
+        if (gear == null || gear.getItemMeta() == null) return null;
+        String displayName = gear.getItemMeta().getDisplayName();
+        if (displayName == null) return null;
+        // Strip color codes before matching the " Gem" suffix
+        String stripped = displayName.replaceAll("\u00a7.", "").trim();
+        if (!stripped.endsWith(" Gem")) return null;
+        String skillName = stripped.substring(0, stripped.length() - 4)
+                .trim().toLowerCase().replace(' ', '-');
+        return "fabled.skill." + skillName;
+    }
+
+    /**
+     * Slot id of another skill slot already holding a gem for the same skill,
+     * or null. Two copies of one gem share a permission node and a Fabled
+     * skill, so the second socket has nothing to grant and the first unsocket
+     * revokes both — the caller must refuse the placement instead.
+     */
+    public String duplicateGemSlot(Player player, ItemStack gear, String targetSlotId) {
+        String permission = permissionFor(gear);
+        if (permission == null) return null;
+        for (var e : PlayerGearData.getPlayerSlotPerms(player.getUniqueId()).entrySet()) {
+            if (!e.getKey().equals(targetSlotId) && permission.equals(e.getValue())) return e.getKey();
+        }
+        return null;
     }
 
     /** Called when a gem is placed in a skill-type slot. */
     public void handleSkillSlot(Player player, ItemStack gear, String slotId) {
-        if (gear == null || gear.getItemMeta() == null) return;
-        String displayName = gear.getItemMeta().getDisplayName();
-        if (displayName == null) return;
-
-        // Strip color codes before matching the " Gem" suffix
-        String stripped = displayName.replaceAll("\u00a7.", "").trim();
-        if (!stripped.endsWith(" Gem")) return;
-
-        String skillName = stripped.substring(0, stripped.length() - 4)
-                .trim().toLowerCase().replace(' ', '-');
-        String permission = "fabled.skill." + skillName;
+        String permission = permissionFor(gear);
+        if (permission == null) return;
         UUID uuid = player.getUniqueId();
 
-        // Revoke any previous permission this slot was granting (e.g. swap)
+        // Revoke any previous permission this slot was granting (e.g. swap).
+        // The free-level flag must be read before the ledger row is rewritten.
         String previous = PlayerGearData.getSlotPermission(uuid, slotId);
         if (previous != null && !previous.equals(permission)) {
-            lp.revoke(uuid, previous);
-            resetFabledSkill(player, previous);
+            releasePermission(player, slotId, previous);
         }
 
         // Track {slot → perm} so we can revoke on removal
         PlayerGearData.setSlotPermission(uuid, slotId, permission);
-        lp.grant(uuid, permission);
+        // The gem is the skill: level 0 -> 1 now, no point spent, and Fabled
+        // puts an active on the action bar itself off the unlock event.
+        // Chained on the grant: the LP node is added on a LuckPerms worker, and
+        // the skill's Initialize trigger checks that node (`Permission`
+        // condition). Level up before it lands and a passive's buff is never
+        // applied — there is no longer a 10s loop to catch it on the next pass.
+        lp.grant(uuid, permission).whenComplete((v, err) -> {
+            if (err != null) {
+                plugin.getLogger().warning("LP grant of " + permission + " failed for " + player.getName() + ": " + err);
+            }
+            levels.onSocket(player, slotId, permission);
+        });
 
         configManager.debug("Granted permission: " + permission + " to " + player.getName() + " (slot " + slotId + ")");
     }
@@ -76,32 +111,36 @@ class SkillHandler {
             configManager.debug("No permission tracked for slot " + slotId);
             return;
         }
-        lp.revoke(uuid, permission);
+        releasePermission(player, slotId, permission);
         PlayerGearData.removeSlotPermission(uuid, slotId);
-        resetFabledSkill(player, permission);
         configManager.debug("Revoked permission " + permission + " from " + player.getName() + " (slot " + slotId + ")");
     }
 
     /**
-     * Translate a permission node back to a Fabled skill name and dispatch
-     * <code>/class forceskill &lt;player&gt; reset &lt;skill&gt;</code> as console.
+     * Take {@code permission} away from {@code slotId}: reset the Fabled skill
+     * (free level dropped, paid levels refunded) and revoke the LuckPerms node.
+     * Order matters — the reset reads the free-level flag from the ledger row
+     * the caller is about to delete or rewrite.
      *
-     * Permission format: <code>fabled.skill.aoe-boost</code> →
-     * skill name: <code>aoe boost</code> (Fabled is case-insensitive).
+     * <p>If another skill slot still holds a gem for the same skill (duplicates
+     * socketed before the one-gem-per-skill rule), the skill and node are left
+     * alone so the surviving gem keeps working; only this slot's row goes.
      */
-    private void resetFabledSkill(Player player, String permission) {
-        if (permission == null || !permission.startsWith("fabled.skill.")) return;
-        String skillName = permission.substring("fabled.skill.".length()).replace('-', ' ');
-        String cmd = "class forceskill " + player.getName() + " reset " + skillName;
-        // Run on the main thread; LuckPerms callbacks may dispatch off-thread.
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            try {
-                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
-                configManager.debug("Dispatched: /" + cmd);
-            } catch (Exception e) {
-                plugin.getLogger().warning("Failed to dispatch '" + cmd + "': " + e.getMessage());
+    private void releasePermission(Player player, String slotId, String permission) {
+        UUID uuid = player.getUniqueId();
+        for (var e : PlayerGearData.getPlayerSlotPerms(uuid).entrySet()) {
+            if (!e.getKey().equals(slotId) && permission.equals(e.getValue())) {
+                // The free-level flag follows the skill, not the slot.
+                if (PlayerGearData.isSlotFreeLevel(uuid, slotId)) {
+                    PlayerGearData.setSlotFreeLevel(uuid, e.getKey(), true);
+                }
+                configManager.debug("Kept " + permission + " for " + player.getName()
+                        + ": duplicate gem still in slot " + e.getKey());
+                return;
             }
-        });
+        }
+        levels.onUnsocket(player, slotId, permission);
+        lp.revoke(uuid, permission);
     }
 
     /**

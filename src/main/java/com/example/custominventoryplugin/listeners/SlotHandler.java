@@ -40,6 +40,26 @@ class SlotHandler {
         return this.skillHandler;
     }
 
+    /**
+     * True (and the player is told) when {@code item} is a gem for a skill
+     * that is already socketed in a different skill slot. One gem per skill:
+     * both copies would share one permission node and one Fabled skill, so
+     * the second grants nothing and unsocketing either revokes both.
+     */
+    private boolean rejectDuplicateGem(Player player, ItemStack item, ConfigManager.CustomSlot slot, String slotId) {
+        if (!"skill".equalsIgnoreCase(slot.getSlotType())) return false;
+        String other = this.skillHandler.duplicateGemSlot(player, item, slotId);
+        if (other == null) return false;
+        String name = item.getItemMeta() != null && item.getItemMeta().hasDisplayName()
+                ? item.getItemMeta().getDisplayName().replaceAll("\u00a7.", "").trim()
+                : "that gem";
+        player.sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&',
+                "&8[&dSkill&8] &cYou already have a " + name + " socketed. One gem per skill."));
+        this.configManager.debug("Refused duplicate gem " + name + " for " + player.getName()
+                + " (already in slot " + other + ")");
+        return true;
+    }
+
     private void handleSlotChange(Player player, String slotId, ConfigManager.CustomSlot slot, ItemStack newItem) {
         this.configManager.debug("Handling slot change for slot " + slotId + " for player " + player.getName());
         this.updateSlotAttributes(player, slotId, newItem, slot);
@@ -91,6 +111,7 @@ class SlotHandler {
             ConfigManager.CustomSlot customSlot = entry.getValue();
             int guiSlot = customSlot.getPosition();
             if (!customSlot.isEnabled() || !this.configManager.isSkillSlotUnlocked(customSlot, player) || !this.isValidItemForSlot(clickedItem, customSlot) || (slotItem = event.getInventory().getItem(guiSlot)) != null && !slotItem.getType().isAir()) continue;
+            if (this.rejectDuplicateGem(player, clickedItem, customSlot, slotId)) return true;
             ItemStack singleItem = clickedItem.clone();
             singleItem.setAmount(1);
             this.handleSlotChange(player, slotId, customSlot, singleItem);
@@ -132,6 +153,7 @@ class SlotHandler {
             ItemStack cursorItem = event.getCursor().clone();
             ItemStack slotItem = event.getCurrentItem().clone();
             if (this.isValidItemForSlot(cursorItem, customSlot) && this.isValidItemForSlot(slotItem, customSlot)) {
+                if (this.rejectDuplicateGem(player, cursorItem, customSlot, slotId)) return;
                 cursorItem.setAmount(1);
                 this.handleSlotChange(player, slotId, customSlot, cursorItem);
                 event.getInventory().setItem(event.getRawSlot(), cursorItem);
@@ -144,6 +166,7 @@ class SlotHandler {
             if (!this.isValidItemForSlot(event.getCursor(), customSlot)) {
                 return;
             }
+            if (this.rejectDuplicateGem(player, event.getCursor(), customSlot, slotId)) return;
             ItemStack newItem = event.getCursor().clone();
             newItem.setAmount(1);
             this.handleSlotChange(player, slotId, customSlot, newItem);
@@ -178,6 +201,10 @@ class SlotHandler {
                 }
                 ItemStack draggedItem = event.getOldCursor();
                 if (!this.isValidItemForSlot(draggedItem, customSlot)) {
+                    event.setCancelled(true);
+                    return;
+                }
+                if (this.rejectDuplicateGem(player, draggedItem, customSlot, slotId)) {
                     event.setCancelled(true);
                     return;
                 }

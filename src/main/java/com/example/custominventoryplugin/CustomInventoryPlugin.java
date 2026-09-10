@@ -28,6 +28,8 @@ import com.example.custominventoryplugin.data.PlayerGearData;
 import com.example.custominventoryplugin.food.FoodRegenConfig;
 import com.example.custominventoryplugin.food.FoodRegenListener;
 import com.example.custominventoryplugin.food.FoodRegenService;
+import com.example.custominventoryplugin.skills.GemSkillLevels;
+import com.example.custominventoryplugin.skills.RefundCommand;
 import com.example.custominventoryplugin.listeners.DeathLootListener;
 import com.example.custominventoryplugin.listeners.HarvestPickupListener;
 import com.example.custominventoryplugin.listeners.InfiniteArrowsListener;
@@ -80,6 +82,7 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
     private EconomyHook economyHook;
     private PickupPipeline pickupPipeline;
     private LuckPermsBridge luckPermsBridge;
+    private GemSkillLevels gemSkillLevels;
     private GroupDropData groupDropData;
     private GroupDropConfig groupDropConfig;
     private RewardService rewardService;
@@ -137,6 +140,12 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
+
+        // ─── gem skill levels (socket = level 1, refund-safe) ─────────────
+        // Must exist before InventoryListener builds SlotHandler/SkillHandler.
+        this.gemSkillLevels = new GemSkillLevels(this);
+        getCommand("refund").setExecutor(new RefundCommand(this));
+        getServer().getPluginManager().registerEvents(new RefundCommand.Intercept(this), this);
 
         // ─── food regen ───────────────────────────────────────────────────
         // Built before the tooltip service, which needs it to write the regen
@@ -318,6 +327,7 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
     public ConfigManager   getConfigManager()    { return this.configManager; }
     public BackpackConfig  getBackpackConfig()   { return this.backpackConfig; }
     public LuckPermsBridge getLuckPermsBridge()  { return this.luckPermsBridge; }
+    public GemSkillLevels  getGemSkillLevels()   { return this.gemSkillLevels; }
     public Database        getDatabase()         { return this.database; }
     public BackpackData    getBackpackData()     { return this.backpackData; }
     public BackpackSettingsData  getSettingsData()  { return this.settingsData; }
@@ -356,6 +366,12 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
                 com.example.custominventoryplugin.inventory.StatsPanel.resetOnJoin(this, player);
             }
         }, 20L);
+        // Gem skills socketed before 1.29.6 (or reset by an admin) still sit at
+        // level 0. Fabled loads its player data from SQL off-thread, so give it
+        // a moment before the audit reads levels.
+        if (this.gemSkillLevels != null) {
+            getServer().getScheduler().runTaskLater(this, () -> this.gemSkillLevels.reconcile(player), 60L);
+        }
     }
 
     @EventHandler

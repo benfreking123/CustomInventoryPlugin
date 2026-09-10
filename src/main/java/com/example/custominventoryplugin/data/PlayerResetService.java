@@ -31,11 +31,15 @@ public final class PlayerResetService {
         if (!slotPerms.isEmpty()) {
             LuckPermsBridge lp = plugin.getLuckPermsBridge();
             Player online = Bukkit.getPlayer(uuid);
-            for (String perm : slotPerms.values()) {
+            for (Map.Entry<String, String> e : slotPerms.entrySet()) {
+                String perm = e.getValue();
                 if (perm == null || perm.isBlank()) continue;
                 lp.revoke(uuid, perm);
                 if (online != null) {
-                    resetFabledSkill(online, perm);
+                    // Goes through GemSkillLevels so a free gem level is
+                    // dropped, not refunded (must run before clearPlayerData
+                    // deletes the free_level flag it reads).
+                    plugin.getGemSkillLevels().onUnsocket(online, e.getKey(), perm);
                 } else if (playerName != null && !playerName.isBlank()) {
                     Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
                             "class forceskill " + playerName + " reset " + skillNameFromPerm(perm));
@@ -81,13 +85,10 @@ public final class PlayerResetService {
         }
     }
 
-    private static void resetFabledSkill(Player player, String permission) {
-        String skill = skillNameFromPerm(permission);
-        if (skill == null) return;
-        Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
-                "class forceskill " + player.getName() + " reset " + skill);
-    }
-
+    /**
+     * Offline fallback only. {@code forceskill reset} refunds by level, so a
+     * free gem level pays out a point here; the online path avoids that.
+     */
     private static String skillNameFromPerm(String permission) {
         if (permission == null || !permission.startsWith("fabled.skill.")) return null;
         // "fabled.skill.ice-shard" → "ice shard" (Fabled forceskill wants spaced name)
