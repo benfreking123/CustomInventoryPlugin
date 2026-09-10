@@ -1,5 +1,6 @@
 package com.example.custominventoryplugin.autoloot;
 
+import com.example.custominventoryplugin.party.PartyScoreboardService;
 import com.example.custominventoryplugin.tooltip.TooltipStyleService;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -11,6 +12,12 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Rarity flair for ground loot during the AutoLoot pop-out window. Every drop
@@ -26,11 +33,20 @@ public final class LootEffectService {
     private final JavaPlugin plugin;
     private final AutoLootConfig config;
     private final TooltipStyleService tooltip;
+    private Supplier<Collection<Scoreboard>> boardSource;
 
     public LootEffectService(JavaPlugin plugin, AutoLootConfig config, TooltipStyleService tooltip) {
         this.plugin = plugin;
         this.config = config;
         this.tooltip = tooltip;
+    }
+
+    /**
+     * Extra scoreboards to tint on, set after construction because the party
+     * services are built later in onEnable.
+     */
+    public void setBoardSource(Supplier<Collection<Scoreboard>> boardSource) {
+        this.boardSource = boardSource;
     }
 
     /** Glow + (mythic/legendary) burst on a freshly-spawned ground item. */
@@ -41,8 +57,7 @@ public final class LootEffectService {
         if (glow == null) return;
 
         entity.setGlowing(true);
-        Team team = teamFor(glow);
-        if (team != null) team.addEntry(entity.getUniqueId().toString());
+        forEachTeam(glow, team -> team.addEntry(entity.getUniqueId().toString()));
 
         if (config.isBurst(tier)) {
             Color c = config.burstColorFor(tier);
@@ -60,24 +75,36 @@ public final class LootEffectService {
         String tier = tooltip.resolveTier(entity.getItemStack());
         ChatColor glow = config.glowFor(tier);
         if (glow == null) return;
-        Team team = teamFor(glow);
-        if (team != null) team.removeEntry(entity.getUniqueId().toString());
+        forEachTeam(glow, team -> team.removeEntry(entity.getUniqueId().toString()));
     }
 
-    /** One shared team per glow colour on the main scoreboard, created on demand. */
-    private Team teamFor(ChatColor color) {
-        try {
-            Scoreboard board = Bukkit.getScoreboardManager().getMainScoreboard();
-            String name = "cip_lt_" + color.name();
-            Team team = board.getTeam(name);
-            if (team == null) {
-                team = board.registerNewTeam(name);
-                team.setColor(color);
+    /**
+     * Apply {@code action} to the glow team on every scoreboard a player might
+     * be viewing.
+     *
+     * <p>Glow tint is read from the VIEWER's scoreboard, so the main board alone
+     * is not enough: anyone holding a personal board (the party sidebar) would
+     * see plain white glow. {@link PartyScoreboardService} mirrors the team
+     * definitions onto those boards; the entries have to be written here,
+     * because items spawn long after a board is handed out.
+     */
+    private void forEachTeam(ChatColor color, Consumer<Team> action) {
+        String name = "cip_lt_" + color.name();
+        List<Scoreboard> boards = new ArrayList<>();
+        boards.add(Bukkit.getScoreboardManager().getMainScoreboard());
+        if (boardSource != null) boards.addAll(boardSource.get());
+
+        for (Scoreboard board : boards) {
+            try {
+                Team team = board.getTeam(name);
+                if (team == null) {
+                    team = board.registerNewTeam(name);
+                    team.setColor(color);
+                }
+                action.accept(team);
+            } catch (Throwable t) {
+                plugin.getLogger().warning("Loot glow team failed: " + t.getMessage());
             }
-            return team;
-        } catch (Throwable t) {
-            plugin.getLogger().warning("Loot glow team failed: " + t.getMessage());
-            return null;
         }
     }
 }

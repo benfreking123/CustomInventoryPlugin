@@ -214,10 +214,19 @@ public class Database {
                 "  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
+            // ─── party HUD preference (v1.28.0) ────────────────────────────
+            // Per-PLAYER, not per-party: whether the party sidebar is shown.
+            s.executeUpdate(
+                "CREATE TABLE IF NOT EXISTS cip_party_hud (" +
+                "  player_uuid CHAR(36) PRIMARY KEY," +
+                "  show_board  TINYINT(1) NOT NULL DEFAULT 1," +
+                "  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
             plugin.getLogger().info("Schema verified: cip_player_gear, cip_player_slot_attrs, cip_player_slot_perms, "
                     + "cip_player_backpack, cip_player_pickup_settings, cip_player_backpack_settings, "
                     + "cip_groupdrop_def, cip_groupdrop_option, cip_groupdrop_grant, cip_groupdrop_claim, "
-                    + "cip_bestiary_kills, cip_counters, cip_party_settings");
+                    + "cip_bestiary_kills, cip_counters, cip_party_settings, cip_party_hud");
         }
     }
 }

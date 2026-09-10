@@ -1,6 +1,12 @@
 package com.example.custominventoryplugin.groupdrop;
 
 import com.example.custominventoryplugin.CustomInventoryPlugin;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickCallback;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -13,6 +19,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -121,6 +128,7 @@ public class GroupDropListener implements Listener {
         if (chooser.isTokenTriggered() && !chooser.isTokenConsumed()) {
             if (!rewards.consumeToken(player, group.getId())) {
                 player.sendMessage(Text.c("&cYou no longer have a token for this reward."));
+                chooser.setSuppressReopen(true);
                 player.closeInventory();
                 return;
             }
@@ -142,6 +150,57 @@ public class GroupDropListener implements Listener {
             chooser.render();
             player.sendActionBar(Text.c("&e" + chooser.getPicksRemaining() + " pick(s) remaining."));
         }
+    }
+
+    /**
+     * Closing the chooser with picks still owed is almost always an accident —
+     * Esc is one keystroke and the window looks like any other chest. Nothing
+     * reopened it, and where a chooser gates progress (the tutorial's gem room
+     * hands out the starter skill this way, and its exit door only opens for a
+     * player who owns one) that left the player permanently stuck. So offer a
+     * way back in rather than assuming the close meant "no thanks".
+     */
+    @EventHandler
+    public void onChooserClose(InventoryCloseEvent event) {
+        if (!(event.getInventory().getHolder() instanceof GroupDropChooser chooser)) return;
+        if (!(event.getPlayer() instanceof Player player)) return;
+
+        // A right-click preview closes this window on its way out; onPreviewClose
+        // puts it straight back, so it is not a close from the player's point of view.
+        if (chooser.isOpeningPreview()) return;
+        // We closed it ourselves and meant it.
+        if (chooser.isSuppressReopen()) return;
+        // Nothing left to pick — closing is how a finished session ends.
+        if (chooser.getPicksRemaining() <= 0) return;
+
+        // Sending during the close event lands before the window is gone on the
+        // client; a tick later it is the first thing in an empty chat.
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            if (player.isOnline()) player.sendMessage(reopenPrompt(chooser));
+        });
+    }
+
+    /**
+     * The click reopens this same chooser rather than running {@code /groupdrop <id>}.
+     * A fresh one would come back with tokenConsumed = false and charge a second
+     * token for the next pick of a part-finished token session, and it would
+     * re-run the permission gate the player already passed.
+     */
+    private Component reopenPrompt(GroupDropChooser chooser) {
+        ClickCallback.Options options = ClickCallback.Options.builder()
+                .uses(ClickCallback.UNLIMITED_USES)
+                .lifetime(Duration.ofMinutes(30))
+                .build();
+
+        Component link = Component.text("[Click here to choose]")
+                .color(NamedTextColor.AQUA)
+                .decoration(TextDecoration.UNDERLINED, true)
+                .hoverEvent(HoverEvent.showText(Text.c("&7Reopen the reward window")))
+                .clickEvent(ClickEvent.callback(audience -> {
+                    if (audience instanceof Player p) p.openInventory(chooser.getInventory());
+                }, options));
+
+        return Text.c("&8[&6Reward&8] &7You closed the window without choosing. ").append(link);
     }
 
     // ─── preview ──────────────────────────────────────────────────────────

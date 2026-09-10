@@ -32,6 +32,12 @@ public final class CompendiumStats {
     public final int crystals;
     public final int dungeonRuns;
     public final int checkpoints;
+    public final int cratesOpened;
+    public final int crateMimics;
+    /** Breaches cleared (Breach plugin, {@code breach.completed}). */
+    public final int breachCompleted;
+    /** Highest breach tier with a clear ({@code breach.tier.<n>} > 0), 0 if none. */
+    public final int breachHighest;
     public final double floorsPct;
     public final double questsPct;
     public final double bestiaryPct;
@@ -43,6 +49,8 @@ public final class CompendiumStats {
                             int bestiaryFound, int bestiaryTotal,
                             List<QuestProgress.FloorQuests> questRows, int questsDone, int questsTotal,
                             Map<String, Integer> counters, int crystals, int dungeonRuns, int checkpoints,
+                            int cratesOpened, int crateMimics,
+                            int breachCompleted, int breachHighest,
                             double floorsPct, double questsPct, double bestiaryPct,
                             double collectionsPct, double miscPct, int score) {
         this.hours = hours;
@@ -59,6 +67,10 @@ public final class CompendiumStats {
         this.crystals = crystals;
         this.dungeonRuns = dungeonRuns;
         this.checkpoints = checkpoints;
+        this.cratesOpened = cratesOpened;
+        this.crateMimics = crateMimics;
+        this.breachCompleted = breachCompleted;
+        this.breachHighest = breachHighest;
         this.floorsPct = floorsPct;
         this.questsPct = questsPct;
         this.bestiaryPct = bestiaryPct;
@@ -111,6 +123,16 @@ public final class CompendiumStats {
         int crystals = CounterData.sumPrefix(counters, cfg.crystalsPrefix());
         int dungeonRuns = CounterData.sumPrefix(counters, cfg.dungeonPrefix());
         int checkpoints = CounterData.countPrefix(counters, cfg.checkpointPrefix());
+        // TowerCrates writes exactly one key per opening, with ".mimic" appended
+        // when the crate woke a mimic — so the prefix sum is every opening and
+        // the mimics are a subset of it, not an addition to it.
+        int cratesOpened = CounterData.sumPrefix(counters, cfg.cratesPrefix());
+        int crateMimics = CounterData.sumPrefixSuffix(counters, cfg.cratesPrefix(), ".mimic");
+        // Breach writes one additive key per clear and one per tier cleared, so
+        // "highest tier beaten" is the largest tier key with a count — /cipcount
+        // can only add, and this keeps the plugin free of a set-or-max command.
+        int breachCompleted = CounterData.sumPrefix(counters, cfg.breachPrefix() + "completed");
+        int breachHighest = CounterData.maxNumericSuffix(counters, cfg.breachPrefix() + "tier.");
 
         double floorsPct = clamp01((double) floorsDone.size() / cfg.totalFloors());
         double questsPct = questsTotal == 0 ? 0.0 : clamp01((double) questsDone / questsTotal);
@@ -133,7 +155,8 @@ public final class CompendiumStats {
 
         return new CompendiumStats(hours, deaths, floorsDone, highest,
                 bestiaryFound, bestiaryTotal, questRows, questsDone, questsTotal,
-                counters, crystals, dungeonRuns, checkpoints,
+                counters, crystals, dungeonRuns, checkpoints, cratesOpened, crateMimics,
+                breachCompleted, breachHighest,
                 floorsPct, questsPct, bestiaryPct, collectionsPct, miscPct, score);
     }
 

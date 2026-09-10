@@ -41,14 +41,53 @@ public final class PartyGuiListener implements Listener {
         }
         if (action.equals(PartyInventory.ACT_INVITE)) {
             player.closeInventory();
-            player.sendMessage(Component.text("Invite a player: /ci party invite <name>", NamedTextColor.YELLOW));
+            player.sendMessage(Component.text("Invite a player: /party invite <name>", NamedTextColor.YELLOW));
+            return;
+        }
+        if (action.equals(PartyInventory.ACT_ACCEPT)) {
+            player.closeInventory();
+            parties.acceptInvite(player, result -> {
+                switch (result) {
+                    case JOINED -> player.sendMessage(
+                            Component.text("You joined the party.", NamedTextColor.GREEN));
+                    case NO_INVITE -> player.sendMessage(
+                            Component.text("That invite is no longer pending.", NamedTextColor.RED));
+                    case ALREADY_IN_PARTY -> player.sendMessage(
+                            Component.text("You are already in a party.", NamedTextColor.RED));
+                    case PARTY_FULL -> player.sendMessage(
+                            Component.text("That party is full.", NamedTextColor.RED));
+                    case FAILED -> player.sendMessage(
+                            Component.text("Could not join the party.", NamedTextColor.RED));
+                }
+            });
+            return;
+        }
+        if (action.equals(PartyInventory.ACT_DENY)) {
+            player.closeInventory();
+            parties.denyInvite(player, ok -> player.sendMessage(ok
+                    ? Component.text("Invite declined.", NamedTextColor.GRAY)
+                    : Component.text("That invite is no longer pending.", NamedTextColor.RED)));
+            return;
+        }
+        if (action.equals(PartyInventory.ACT_BOARD)) {
+            PartyScoreboardService board = plugin.getPartyScoreboardService();
+            if (board == null) {
+                player.sendMessage(Component.text("The party sidebar is unavailable.", NamedTextColor.RED));
+                return;
+            }
+            boolean on = board.toggle(player);
+            player.sendMessage(Component.text("Party scoreboard " + (on ? "shown." : "hidden."),
+                    on ? NamedTextColor.GREEN : NamedTextColor.GRAY));
+            gui.render();
             return;
         }
         if (action.equals(PartyInventory.ACT_LEAVE)) {
-            if (parties.leave(player)) {
-                player.sendMessage(Component.text("You left the party.", NamedTextColor.GRAY));
-            }
             player.closeInventory();
+            parties.leave(player, ok -> {
+                if (ok) {
+                    player.sendMessage(Component.text("You left the party.", NamedTextColor.GRAY));
+                }
+            });
             return;
         }
         if (action.equals(PartyInventory.ACT_READY)) {
@@ -79,20 +118,28 @@ public final class PartyGuiListener implements Listener {
         if (action.startsWith(PartyInventory.ACT_KICK)) {
             UUID target = UUID.fromString(action.substring(PartyInventory.ACT_KICK.length()));
             if (event.getClick() == ClickType.SHIFT_LEFT || event.getClick() == ClickType.SHIFT_RIGHT) {
-                if (parties.promote(player, target)) {
-                    player.sendMessage(Component.text("Promoted new leader.", NamedTextColor.GOLD));
-                }
+                parties.promote(player, target, ok -> {
+                    if (ok) player.sendMessage(Component.text("Promoted new leader.", NamedTextColor.GOLD));
+                    rerender(gui);
+                });
             } else {
-                if (parties.kick(player, target)) {
-                    player.sendMessage(Component.text("Kicked from party.", NamedTextColor.GRAY));
-                    Player online = Bukkit.getPlayer(target);
-                    if (online != null) {
-                        online.sendMessage(Component.text("You were kicked from the party.", NamedTextColor.RED));
+                parties.kick(player, target, ok -> {
+                    if (ok) {
+                        player.sendMessage(Component.text("Kicked from party.", NamedTextColor.GRAY));
+                        Player online = Bukkit.getPlayer(target);
+                        if (online != null) {
+                            online.sendMessage(Component.text("You were kicked from the party.", NamedTextColor.RED));
+                        }
                     }
-                }
+                    rerender(gui);
+                });
             }
-            gui.render();
         }
+    }
+
+    /** Roster mutations answer off the main thread; inventories are not safe there. */
+    private void rerender(PartyInventory gui) {
+        Bukkit.getScheduler().runTask(plugin, gui::render);
     }
 
     @EventHandler

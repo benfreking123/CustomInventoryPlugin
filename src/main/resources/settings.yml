@@ -50,6 +50,44 @@ autoloot:
       cursed: common
       archieve: common
 
+# Food regen — what eating is FOR, now that it no longer heals.
+#
+# The natural_health_regeneration gamerule is false on every world, so vanilla's
+# "a full hunger bar heals you" path is gone. Healing is the Natural
+# Regeneration Fabled passive (1% of max HP per second). Eating adds a timed
+# bonus to that passive's flat term, stat_health_regen_mod.
+#
+#   regen   — flat HP per second added while the buff lasts. Whole numbers only:
+#             Fabled's getAttribute() returns an int, so 0.5 truncates to 0.
+#   seconds — how long it lasts. Eating again REFRESHES, it does not stack.
+#
+# The same numbers are written onto the item's tooltip, so a food is documented
+# by the entry that powers it. Reloadable with /ci reload.
+#
+# Only list plain vanilla food here. The tooltip rebuilds an item's lore
+# wholesale to stay idempotent, which would wipe the lore off a Divinity
+# consumable (the health potions in particular).
+food-regen:
+  enabled: true
+  foods:
+    BREAD:
+      regen: 2
+      seconds: 30
+    COOKED_PORKCHOP:
+      regen: 5
+      seconds: 45
+
+# Party GUI (/ci party) background art.
+#   glyph — the char mapped to party_bg in Nexo interface.yml
+#           (ꐷ / U+A437). It used to borrow codex_bg, the bestiary's frame,
+#           which is why the party menu looked like the Compendium.
+#   shift — horizontal pull-left (px) for the 256px frame. Pair with the
+#           glyph's `ascent` in interface.yml when tuning vertical position.
+party:
+  display:
+    glyph: "ꐷ"
+    shift: 16
+
 # How many skill-gem slots are usable with NO permission. The first N slots of
 # each type (ordered left-to-right by position) are always open; every slot
 # beyond N is locked until the player has that slot's `permission` node below.

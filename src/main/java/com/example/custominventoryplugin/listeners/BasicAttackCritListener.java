@@ -1,8 +1,8 @@
 package com.example.custominventoryplugin.listeners;
 
+import com.example.custominventoryplugin.combat.CritCalculator;
 import com.example.custominventoryplugin.config.ConfigManager;
 import org.bukkit.ChatColor;
-import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -29,7 +29,7 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <p>Hooking {@link DivinityDamageEvent.BeforeScale} instead means the damage
  * map is fully populated, and {@code computeDamage} scales every element at
- * once. The roll still reads Fabled attributes through
+ * once. The roll reads Fabled attributes through
  * {@link PlayerData#getAttribute(String)} — the same call Fabled's own
  * {@code Value Attribute} mechanic makes — so gems, rings and invested points
  * all feed basic-attack crit exactly as they feed skill crit.
@@ -38,11 +38,6 @@ import java.util.concurrent.ThreadLocalRandom;
  * graph, and double-rolling would stack two multipliers on one hit.
  */
 public class BasicAttackCritListener implements Listener {
-
-    /** Fabled category suffix for melee weapons. */
-    private static final String MELEE = "attack";
-    /** Fabled category suffix for bows and crossbows. */
-    private static final String RANGED = "projectile";
 
     private final ConfigManager config;
 
@@ -63,11 +58,12 @@ public class BasicAttackCritListener implements Listener {
         PlayerData data = Fabled.getData((OfflinePlayer) player);
         if (data == null) return;
 
-        double chance = critChance(data, category);
+        double chance = CritCalculator.chance(data, category, this.config.getCritBaseChance());
         if (chance <= 0.0) return;
         if (ThreadLocalRandom.current().nextDouble(100.0) >= chance) return;
 
-        final double multiplier = critMultiplier(data, category);
+        final double multiplier =
+                CritCalculator.multiplier(data, category, this.config.getCritBaseMultiplier());
         event.computeDamage(damage -> damage * multiplier);
 
         String message = this.config.getCritMessage();
@@ -77,36 +73,12 @@ public class BasicAttackCritListener implements Listener {
     }
 
     /**
-     * Which Fabled crit category a hit belongs to, or null for weapons that do
-     * not get basic-attack crit (wands cast skills, which crit on their own).
+     * Arrows arrive with the bow as the weapon, but a thrown trident or a
+     * skill-spawned projectile can arrive with something else, so trust
+     * Divinity's projectile flag first and fall back to the material.
      */
     private static String categoryOf(ItemStack weapon, boolean projectile) {
-        if (projectile) return RANGED;
-        if (weapon == null) return null;
-        Material material = weapon.getType();
-        if (material == Material.BOW || material == Material.CROSSBOW) return RANGED;
-        return material.name().endsWith("_SWORD") ? MELEE : null;
-    }
-
-    /**
-     * Base chance plus the flat {@code base_crit_chance} layers, lifted by the
-     * increased-percent {@code stat_crit_chance} layers. Mirrors the formula in
-     * the Fabled skill graph, where the generic and per-category attributes are
-     * summed rather than treated as alternatives.
-     */
-    private double critChance(PlayerData data, String category) {
-        double flat = this.config.getCritBaseChance()
-                + data.getAttribute("base_crit_chance")
-                + data.getAttribute("base_crit_chance_" + category);
-        double increased = data.getAttribute("stat_crit_chance")
-                + data.getAttribute("stat_crit_chance_" + category);
-        return flat * (1.0 + increased * 0.01);
-    }
-
-    /** Base multiplier plus the {@code stat_crit_damage} layers, as percent. */
-    private double critMultiplier(PlayerData data, String category) {
-        double bonus = data.getAttribute("stat_crit_damage")
-                + data.getAttribute("stat_crit_damage_" + category);
-        return this.config.getCritBaseMultiplier() + bonus * 0.01;
+        if (projectile) return CritCalculator.RANGED;
+        return CritCalculator.categoryOf(weapon == null ? null : weapon.getType());
     }
 }

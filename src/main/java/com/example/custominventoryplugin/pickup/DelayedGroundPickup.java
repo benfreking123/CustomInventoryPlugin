@@ -76,9 +76,16 @@ public final class DelayedGroundPickup {
                 PickupAnimator.collect(entity, owner, Math.max(1, absorbed));
                 entity.remove();
             } else {
+                // The vacuum ran and could not take it all — the owner's bags and
+                // inventory are full. Hand the remainder back to the world as an
+                // ordinary drop: the owner lock and the despawn exemption exist
+                // only to protect the pop-out window, and keeping them here is
+                // what left un-lootable piles lying around forever.
                 entity.setItemStack(remaining);
                 entity.setPickupDelay(0);
-                entity.setOwner(owner.getUniqueId());
+                entity.setOwner(null);
+                entity.setUnlimitedLifetime(false);
+                if (effects != null) effects.undecorate(entity);
             }
         }, delay);
     }

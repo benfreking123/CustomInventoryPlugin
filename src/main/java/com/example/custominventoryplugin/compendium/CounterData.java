@@ -15,8 +15,9 @@ import java.util.logging.Level;
 /**
  * Generic cross-server counters (cip_counters). One row per (player, key).
  * Keys are dot-namespaced, e.g. {@code crystal.floor2}, {@code dungeon.floor3_dungeon},
- * {@code checkpoint.floor3_1}. Fed by the {@code /cipcount} console command
- * (Skript / MythicDungeons hooks) and read by the Compendium.
+ * {@code checkpoint.floor3_1}, {@code crate.vote.rare}. Fed by the
+ * {@code /cipcount} console command (Skript / MythicDungeons / TowerCrates
+ * hooks) and read by the Compendium.
  */
 public class CounterData {
 
@@ -91,7 +92,38 @@ public class CounterData {
         return n;
     }
 
+    /**
+     * Sum of all values whose key starts with {@code prefix} and ends with
+     * {@code suffix} — the subset of a counter family that carries a marker,
+     * e.g. the {@code .mimic} share of {@code crate.*}.
+     */
+    public static int sumPrefixSuffix(Map<String, Integer> counters, String prefix, String suffix) {
+        int n = 0;
+        for (Map.Entry<String, Integer> e : counters.entrySet()) {
+            if (e.getKey().startsWith(prefix) && e.getKey().endsWith(suffix)) n += e.getValue();
+        }
+        return n;
+    }
+
     /** Number of distinct keys with {@code prefix} and value &gt; 0 (discovery flags). */
+    /**
+     * The largest integer suffix among keys {@code prefix<n>} with a positive
+     * value, or 0. Turns a family of additive counters ({@code breach.tier.3},
+     * {@code breach.tier.4}) into a "highest reached" without a max command.
+     */
+    public static int maxNumericSuffix(Map<String, Integer> counters, String prefix) {
+        int best = 0;
+        for (Map.Entry<String, Integer> e : counters.entrySet()) {
+            if (!e.getKey().startsWith(prefix) || e.getValue() == null || e.getValue() <= 0) continue;
+            try {
+                best = Math.max(best, Integer.parseInt(e.getKey().substring(prefix.length())));
+            } catch (NumberFormatException ignored) {
+                // a non-numeric tail is some other key under the prefix
+            }
+        }
+        return best;
+    }
+
     public static int countPrefix(Map<String, Integer> counters, String prefix) {
         int n = 0;
         for (Map.Entry<String, Integer> e : counters.entrySet()) {

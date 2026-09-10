@@ -121,6 +121,17 @@ public class PickupPipeline {
             if (stack == null || stack.getType().isAir()) return 0;
             if (BackpackListener.isForbidden(stack, markerKey)) return 0;
 
+            // Style before anything tries to merge. Both deposit() and
+            // addItem() below decide by isSimilar(), which compares the whole
+            // item, so a freshly dropped catalyst will not stack with a copy
+            // the tooltip pass has already stamped -- that mismatch is why two
+            // Chunks of Scrap sat in separate slots. Every pickup path funnels
+            // through here, so this is the one place that guarantees both
+            // copies are identical before they are compared. Deliberately the
+            // viewer-less overload: per-viewer requirement marks would make
+            // two players' copies differ again.
+            plugin.getTooltipStyleService().stamp(stack);
+
             int remaining = stack.getAmount();
             int absorbed = 0;
 

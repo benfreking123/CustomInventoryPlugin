@@ -25,6 +25,9 @@ import com.example.custominventoryplugin.data.Database;
 import com.example.custominventoryplugin.data.EconomyHook;
 import com.example.custominventoryplugin.data.LuckPermsBridge;
 import com.example.custominventoryplugin.data.PlayerGearData;
+import com.example.custominventoryplugin.food.FoodRegenConfig;
+import com.example.custominventoryplugin.food.FoodRegenListener;
+import com.example.custominventoryplugin.food.FoodRegenService;
 import com.example.custominventoryplugin.listeners.DeathLootListener;
 import com.example.custominventoryplugin.listeners.HarvestPickupListener;
 import com.example.custominventoryplugin.listeners.InfiniteArrowsListener;
@@ -44,9 +47,13 @@ import com.example.custominventoryplugin.listeners.BasicAttackCritListener;
 import com.example.custominventoryplugin.listeners.MainHandAttributeListener;
 import com.example.custominventoryplugin.party.NoOpPartyService;
 import com.example.custominventoryplugin.party.PartiesPartyService;
+import com.example.custominventoryplugin.party.PartyDisplayConfig;
 import com.example.custominventoryplugin.party.PartyGuiListener;
 import com.example.custominventoryplugin.party.PartyLifecycleListener;
 import com.example.custominventoryplugin.party.PartyService;
+import com.example.custominventoryplugin.party.PartyHudStore;
+import com.example.custominventoryplugin.party.PartyScoreboardListener;
+import com.example.custominventoryplugin.party.PartyScoreboardService;
 import com.example.custominventoryplugin.party.PartySettingsStore;
 import com.example.custominventoryplugin.placeholders.BackpackPlaceholders;
 import com.example.custominventoryplugin.tooltip.TooltipConfig;
@@ -87,9 +94,14 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
     private TooltipConfig tooltipConfig;
     private TooltipStyleService tooltipStyleService;
     private AutoLootConfig autoLootConfig;
+    private PartyDisplayConfig partyDisplayConfig;
     private LootEffectService lootEffectService;
     private PartyService partyService;
     private PartySettingsStore partySettingsStore;
+    private PartyHudStore partyHudStore;
+    private PartyScoreboardService partyScoreboardService;
+    private FoodRegenConfig foodRegenConfig;
+    private FoodRegenService foodRegenService;
 
     @Override
     public void onEnable() {
@@ -126,9 +138,18 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
             return;
         }
 
+        // ─── food regen ───────────────────────────────────────────────────
+        // Built before the tooltip service, which needs it to write the regen
+        // line onto a food stack.
+        this.foodRegenConfig = new FoodRegenConfig(this);
+        this.foodRegenService = new FoodRegenService(this);
+        getServer().getPluginManager().registerEvents(
+                new FoodRegenListener(this.foodRegenConfig, this.foodRegenService), this);
+
         // ─── tooltip frames (Divinity tier → minecraft:tooltip_style) ─────
         this.tooltipConfig = new TooltipConfig(this);
-        this.tooltipStyleService = new TooltipStyleService(this, this.tooltipConfig);
+        this.tooltipStyleService =
+                new TooltipStyleService(this, this.tooltipConfig, this.foodRegenConfig);
         // Built before the tooltip listener so its 5-tick hand sweep can double
         // as the reconciler for main-hand Fabled attributes.
         MainHandAttributeListener mainHandAttributes =
@@ -180,6 +201,7 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
         // ─── AutoLoot (server drop manager: rarity glow/burst + routing) ──
         this.autoLootConfig = new AutoLootConfig(this);
         this.lootEffectService = new LootEffectService(this, this.autoLootConfig, this.tooltipStyleService);
+        this.partyDisplayConfig = new PartyDisplayConfig(this);
 
         GearCommand gearCommand = new GearCommand(this.configManager, this);
         getCommand("ci").setExecutor(gearCommand);
@@ -201,6 +223,7 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(new BackpackPickupListener(this, this.pickupPipeline), this);
         // ─── party roster (AlessioDP Parties softdepend) ───────────────────
         this.partySettingsStore = new PartySettingsStore(this, this.database);
+        this.partyHudStore = new PartyHudStore(this, this.database);
         if (getServer().getPluginManager().getPlugin("Parties") != null) {
             try {
                 PartiesPartyService pps = new PartiesPartyService(this, this.partySettingsStore);
@@ -209,7 +232,14 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
                         new PartyLifecycleListener(this.partySettingsStore), this);
                 getServer().getPluginManager().registerEvents(
                         new PartyGuiListener(this, this.partyService), this);
-                getLogger().info("Parties detected — party loot + GUI enabled.");
+                this.partyScoreboardService =
+                        new PartyScoreboardService(this, this.partyService, this.partyHudStore);
+                this.partyScoreboardService.start();
+                getServer().getPluginManager().registerEvents(
+                        new PartyScoreboardListener(this.partyHudStore, this.partyScoreboardService), this);
+                // Personal sidebars cost the viewer the main board's glow teams.
+                this.lootEffectService.setBoardSource(this.partyScoreboardService::activeBoards);
+                getLogger().info("Parties detected — party loot + GUI + sidebar enabled.");
             } catch (Throwable t) {
                 this.partyService = new NoOpPartyService();
                 getLogger().warning("Parties present but API failed to bind (" + t + ") — party features disabled.");
@@ -277,8 +307,10 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        if (this.partyScoreboardService != null) this.partyScoreboardService.shutdown();
         if (this.partyService != null) this.partyService.shutdown();
         if (this.collectionsListener != null) this.collectionsListener.stopSweepTask();
+        if (this.foodRegenService != null) this.foodRegenService.shutdown();
         if (this.database != null) this.database.stop();
         getLogger().info("CustomInventoryPlugin disabled.");
     }
@@ -307,6 +339,10 @@ public class CustomInventoryPlugin extends JavaPlugin implements Listener {
     public AutoLootConfig  getAutoLootConfig()   { return this.autoLootConfig; }
     public LootEffectService getLootEffectService() { return this.lootEffectService; }
     public PartyService    getPartyService()     { return this.partyService; }
+    public PartyScoreboardService getPartyScoreboardService() { return this.partyScoreboardService; }
+    public PartyDisplayConfig getPartyDisplayConfig() { return this.partyDisplayConfig; }
+    public FoodRegenConfig  getFoodRegenConfig()  { return this.foodRegenConfig; }
+    public FoodRegenService getFoodRegenService() { return this.foodRegenService; }
 
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {

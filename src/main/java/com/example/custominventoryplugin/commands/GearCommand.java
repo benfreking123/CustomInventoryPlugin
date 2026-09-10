@@ -8,6 +8,7 @@ import com.example.custominventoryplugin.inventory.StatsPanel;
 import com.example.custominventoryplugin.listeners.AttributeAuditService;
 import com.example.custominventoryplugin.party.PartiesPartyService;
 import com.example.custominventoryplugin.party.PartyInventory;
+import com.example.custominventoryplugin.party.PartyScoreboardService;
 import com.example.custominventoryplugin.party.PartyService;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
@@ -58,21 +59,67 @@ public class GearCommand implements CommandExecutor, TabCompleter {
             }
             if (args.length >= 2 && args[1].equalsIgnoreCase("invite")) {
                 if (args.length < 3) {
-                    player.sendMessage("\u00a7cUsage: \u00a7e/ci party invite <player>");
+                    player.sendMessage("\u00a7cUsage: \u00a7e/party invite <player>");
                     return true;
                 }
                 Player target = Bukkit.getPlayerExact(args[2]);
                 if (target == null) {
-                    player.sendMessage("\u00a7cPlayer not online on this server.");
+                    // This command only sees players on this backend; the proxy
+                    // command reaches the whole network.
+                    player.sendMessage("\u00a7c" + args[2] + " is not on this server. \u00a7e/p "
+                            + args[2] + "\u00a7c them to meet, then invite from \u00a7e/party\u00a7c.");
                     return true;
                 }
-                if (parties.invite(player, target)) {
-                    player.sendMessage("\u00a7aInvited \u00a7f" + target.getName() + "\u00a7a.");
-                    target.sendMessage("\u00a7e" + player.getName()
-                            + "\u00a7a invited you to a party. Use \u00a7f/party accept\u00a7a.");
-                } else {
-                    player.sendMessage("\u00a7cCould not send invite.");
+                String name = target.getName();
+                parties.invite(player, target, result -> {
+                    switch (result) {
+                        // Parties messages both sides from the PROXY, which
+                        // receives the invite packet whether or not the backend
+                        // was told to send messages — so anything added here
+                        // arrives as a second, duplicate prompt.
+                        case SENT -> { }
+                        case SELF -> player.sendMessage("\u00a7cYou cannot invite yourself.");
+                        case ALREADY_IN_PARTY ->
+                                player.sendMessage("\u00a7c" + name + " is already in a party.");
+                        case ALREADY_INVITED ->
+                                player.sendMessage("\u00a7e" + name + " already has a pending invite.");
+                        case PARTY_FULL ->
+                                player.sendMessage("\u00a7cYour party is full.");
+                        case FAILED ->
+                                player.sendMessage("\u00a7cCould not invite " + name + ".");
+                    }
+                });
+                return true;
+            }
+            if (args.length >= 2 && args[1].equalsIgnoreCase("accept")) {
+                // Optional inviter, for a player holding more than one invite.
+                String who = args.length >= 3 ? args[2] : null;
+                parties.acceptInvite(player, who, result -> {
+                    switch (result) {
+                        case JOINED -> player.sendMessage("\u00a7aYou joined the party.");
+                        case NO_INVITE -> player.sendMessage(noInviteText(player, who));
+                        case ALREADY_IN_PARTY -> player.sendMessage("\u00a7cYou are already in a party.");
+                        case PARTY_FULL -> player.sendMessage("\u00a7cThat party is full.");
+                        case FAILED -> player.sendMessage("\u00a7cCould not join the party.");
+                    }
+                });
+                return true;
+            }
+            if (args.length >= 2 && args[1].equalsIgnoreCase("deny")) {
+                String who = args.length >= 3 ? args[2] : null;
+                parties.denyInvite(player, who, ok -> player.sendMessage(ok
+                        ? "\u00a77Invite declined."
+                        : noInviteText(player, who)));
+                return true;
+            }
+            if (args.length >= 2 && args[1].equalsIgnoreCase("board")) {
+                PartyScoreboardService board = plugin.getPartyScoreboardService();
+                if (board == null) {
+                    player.sendMessage("\u00a7cThe party sidebar is unavailable.");
+                    return true;
                 }
+                boolean on = board.toggle(player);
+                player.sendMessage(on ? "\u00a7aParty scoreboard shown." : "\u00a77Party scoreboard hidden.");
                 return true;
             }
             if (args.length >= 2 && args[1].equalsIgnoreCase("ready")) {
@@ -108,7 +155,9 @@ public class GearCommand implements CommandExecutor, TabCompleter {
             ok += safeReload(sender, "quest tags", () -> plugin.getQuestProgress().load());
             ok += safeReload(sender, "bestiary.yml", () -> plugin.getBestiaryConfig().load());
             ok += safeReload(sender, "collections.yml", () -> plugin.getCollectionsConfig().load());
-            sender.sendMessage("\u00a7aCustomInventory reloaded \u00a7f" + ok + "\u00a78/\u00a7f9\u00a7a config section(s).");
+            ok += safeReload(sender, "party display", () -> plugin.getPartyDisplayConfig().reload());
+            ok += safeReload(sender, "food regen", () -> plugin.getFoodRegenConfig().reload());
+            sender.sendMessage("\u00a7aCustomInventory reloaded \u00a7f" + ok + "\u00a78/\u00a7f11\u00a7a config section(s).");
             return true;
         }
 
@@ -256,6 +305,23 @@ public class GearCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    /**
+     * "No invite" reads as a lie when the player does have one from somebody
+     * else, so name who is actually waiting on them.
+     */
+    private String noInviteText(Player player, String requested) {
+        List<String> inviters = plugin.getPartyService().pendingInviters(player.getUniqueId());
+        if (inviters.isEmpty()) {
+            return "\u00a7cYou have no pending party invite on this server.";
+        }
+        if (requested != null) {
+            return "\u00a7cNo invite from \u00a7f" + requested + "\u00a7c. Waiting on you: \u00a7f"
+                    + String.join("\u00a7c, \u00a7f", inviters);
+        }
+        return "\u00a7cThat invite expired. Waiting on you: \u00a7f"
+                + String.join("\u00a7c, \u00a7f", inviters);
+    }
+
     /** Run one config reload, reporting (not throwing) on failure. Returns 1 on success. */
     private int safeReload(CommandSender sender, String label, Runnable action) {
         try {
@@ -295,7 +361,7 @@ public class GearCommand implements CommandExecutor, TabCompleter {
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("party")) {
             String p = args[1].toLowerCase(Locale.ROOT);
-            for (String t : List.of("invite", "ready")) {
+            for (String t : List.of("invite", "accept", "deny", "ready", "board")) {
                 if (t.startsWith(p)) out.add(t);
             }
             return out;

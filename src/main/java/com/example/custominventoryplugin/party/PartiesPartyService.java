@@ -4,6 +4,7 @@ import com.alessiodp.parties.api.Parties;
 import com.alessiodp.parties.api.enums.Status;
 import com.alessiodp.parties.api.interfaces.PartiesAPI;
 import com.alessiodp.parties.api.interfaces.Party;
+import com.alessiodp.parties.api.interfaces.PartyInvite;
 import com.alessiodp.parties.api.interfaces.PartyPlayer;
 import com.alessiodp.parties.api.interfaces.PartyRank;
 import com.example.custominventoryplugin.CustomInventoryPlugin;
@@ -17,12 +18,15 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * AlessioDP Parties-backed {@link PartyService}. Reads/writes the shared roster;
@@ -121,6 +125,11 @@ public final class PartiesPartyService implements PartyService {
     }
 
     @Override
+    public Optional<LootMode> peekLootMode(UUID partyId) {
+        return settings.peekLootMode(partyId);
+    }
+
+    @Override
     public void setLootMode(UUID partyId, LootMode mode) {
         settings.setLootMode(partyId, mode);
     }
@@ -139,27 +148,245 @@ public final class PartiesPartyService implements PartyService {
         return false;
     }
 
-    @Override
-    public boolean invite(Player from, Player target) {
-        if (from == null || target == null) return false;
-        PartyPlayer inviter = api.getPartyPlayer(from.getUniqueId());
-        PartyPlayer invited = api.getPartyPlayer(target.getUniqueId());
-        if (inviter == null || invited == null) return false;
-
-        Party party = api.getPartyOfPlayer(from.getUniqueId());
-        if (party == null) {
-            // Auto-create named after the leader (matches Parties dynamic naming).
-            boolean created = api.createParty(from.getName(), inviter);
-            if (!created) return false;
-            party = api.getPartyOfPlayer(from.getUniqueId());
-            if (party == null) return false;
-            settings.ensureDefault(party.getId());
+    /** Run {@code work} off the primary thread; see PartyService for why. */
+    private void offThread(Runnable work) {
+        if (Bukkit.isPrimaryThread()) {
+            Bukkit.getScheduler().runTaskAsynchronously(plugin, work);
+        } else {
+            work.run();
         }
-        return party.invitePlayer(inviter, invited) != null;
     }
 
     @Override
-    public boolean kick(Player actor, UUID targetId) {
+    public void invite(Player from, Player target, Consumer<InviteResult> callback) {
+        offThread(() -> callback.accept(inviteNow(from, target)));
+    }
+
+    private InviteResult inviteNow(Player from, Player target) {
+        if (from == null || target == null) return InviteResult.FAILED;
+        if (from.getUniqueId().equals(target.getUniqueId())) return InviteResult.SELF;
+        PartyPlayer inviter = api.getPartyPlayer(from.getUniqueId());
+        PartyPlayer invited = api.getPartyPlayer(target.getUniqueId());
+        if (inviter == null || invited == null) {
+            plugin.getLogger().warning("party invite: PartyPlayer missing for "
+                    + from.getName() + " -> " + target.getName());
+            return InviteResult.FAILED;
+        }
+        // getPartyOfPlayer is authoritative; isInParty() only checks that a
+        // party id is SET, so a row left pointing at a deleted party reports
+        // "already in a party" for someone the GUI correctly shows as partyless.
+        // Clear the dangling id rather than leaving them permanently uninvitable.
+        if (api.getPartyOfPlayer(target.getUniqueId()) != null) {
+            return InviteResult.ALREADY_IN_PARTY;
+        }
+        if (invited.isInParty()) {
+            plugin.getLogger().warning("party invite: " + target.getName()
+                    + " had a dangling party id with no party behind it — clearing it");
+            try {
+                api.removePlayerFromParty(invited);
+            } catch (Throwable t) {
+                // The state is already broken; a failure here just means the
+                // player has to /party leave before they can be invited.
+                plugin.getLogger().warning("party invite: could not clear it: " + t);
+            }
+        }
+
+        Party party = api.getPartyOfPlayer(from.getUniqueId());
+        boolean createdHere = false;
+        if (party == null) {
+            // Auto-create named after the leader (matches Parties dynamic naming).
+            if (!api.createParty(from.getName(), inviter)) {
+                plugin.getLogger().warning("party invite: createParty failed for " + from.getName());
+                return InviteResult.FAILED;
+            }
+            party = api.getPartyOfPlayer(from.getUniqueId());
+            if (party == null) {
+                plugin.getLogger().warning("party invite: party missing after create for " + from.getName());
+                return InviteResult.FAILED;
+            }
+            createdHere = true;
+            settings.ensureDefault(party.getId());
+        }
+        if (party.isFull()) return abandon(party, createdHere, InviteResult.PARTY_FULL);
+        for (PartyInvite pending : party.getInviteRequests()) {
+            PartyPlayer pendingTarget = pending.getInvitedPlayer();
+            if (pendingTarget != null
+                    && pendingTarget.getPlayerUUID().equals(target.getUniqueId())) {
+                return abandon(party, createdHere, InviteResult.ALREADY_INVITED);
+            }
+        }
+
+        // Argument order is (invited, inviter): Parties runs isInParty() on the
+        // FIRST argument, so passing them swapped fails once the inviter has a
+        // party — which, after the create above, is always.
+        //
+        // sendMessages is false because Parties' own invite message offers
+        // /party accept, and that command belongs to the proxy, which cannot
+        // see an invite this backend holds in memory. The caller sends a
+        // message pointing at /ci party accept instead.
+        if (party.invitePlayer(invited, inviter, false) == null) {
+            plugin.getLogger().warning("party invite: Parties refused "
+                    + from.getName() + " -> " + target.getName());
+            return abandon(party, createdHere, InviteResult.FAILED);
+        }
+        return InviteResult.SENT;
+    }
+
+    /**
+     * Undo a party we auto-created when the invite it existed for did not go
+     * through. Without this, every failed invite strands a one-member party
+     * named after the inviter, and they pile up in {@code parties_parties}.
+     */
+    private InviteResult abandon(Party party, boolean createdHere, InviteResult result) {
+        if (createdHere && party != null) {
+            try {
+                settings.delete(party.getId());
+                api.deleteParty(party);
+            } catch (Throwable t) {
+                plugin.getLogger().warning("party invite: could not roll back the party "
+                        + "created for this invite: " + t);
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public Optional<String> pendingInviteFrom(UUID playerId) {
+        PartyInvite invite = firstPendingInvite(playerId);
+        if (invite == null) return Optional.empty();
+        String name = inviterName(invite);
+        return Optional.of(name != null ? name : "someone");
+    }
+
+    @Override
+    public List<String> pendingInviters(UUID playerId) {
+        List<String> names = new ArrayList<>();
+        for (PartyInvite invite : pendingInvites(playerId)) {
+            String name = inviterName(invite);
+            if (name != null) names.add(name);
+        }
+        return names;
+    }
+
+    /**
+     * Pending invites in a STABLE order. {@code getPendingInvites()} is an
+     * unordered collection, so with two invites outstanding the name we showed
+     * the player and the party {@code accept} actually joined could differ.
+     * Sorted by inviter name so the two always agree.
+     */
+    private List<PartyInvite> pendingInvites(UUID playerId) {
+        if (playerId == null) return List.of();
+        PartyPlayer pp = api.getPartyPlayer(playerId);
+        if (pp == null) return List.of();
+        List<PartyInvite> out = new ArrayList<>();
+        for (PartyInvite invite : pp.getPendingInvites()) {
+            if (invite.getParty() != null) out.add(invite);
+        }
+        out.sort(Comparator.comparing(i -> {
+            String name = inviterName(i);
+            return name == null ? "\uffff" : name.toLowerCase(Locale.ROOT);
+        }));
+        return out;
+    }
+
+    private String inviterName(PartyInvite invite) {
+        PartyPlayer inviter = invite == null ? null : invite.getInviter();
+        return inviter == null ? null : inviter.getName();
+    }
+
+    private PartyInvite firstPendingInvite(UUID playerId) {
+        List<PartyInvite> invites = pendingInvites(playerId);
+        return invites.isEmpty() ? null : invites.get(0);
+    }
+
+    /** Named invite, so a player with two can choose. Null name = the first. */
+    private PartyInvite pendingInvite(UUID playerId, String inviterName) {
+        if (inviterName == null || inviterName.isBlank()) return firstPendingInvite(playerId);
+        for (PartyInvite invite : pendingInvites(playerId)) {
+            String name = inviterName(invite);
+            if (name != null && name.equalsIgnoreCase(inviterName)) return invite;
+        }
+        return null;
+    }
+
+    @Override
+    public void acceptInvite(Player player, Consumer<AcceptResult> callback) {
+        acceptInvite(player, null, callback);
+    }
+
+    @Override
+    public void acceptInvite(Player player, String inviterName, Consumer<AcceptResult> callback) {
+        offThread(() -> callback.accept(acceptInviteNow(player, inviterName)));
+    }
+
+    private AcceptResult acceptInviteNow(Player player, String inviterName) {
+        if (player == null) return AcceptResult.FAILED;
+        if (api.getPartyOfPlayer(player.getUniqueId()) != null) {
+            return AcceptResult.ALREADY_IN_PARTY;
+        }
+        PartyInvite invite = pendingInvite(player.getUniqueId(), inviterName);
+        if (invite == null) return AcceptResult.NO_INVITE;
+        Party party = invite.getParty();
+        if (party.isFull()) return AcceptResult.PARTY_FULL;
+        try {
+            // false: CIP words its own accept/deny replies, and Parties' copy
+            // would point players at /party accept, which is the proxy command
+            // and reads a roster this backend has already changed.
+            invite.accept(false);
+        } catch (Throwable t) {
+            plugin.getLogger().warning("party accept failed for " + player.getName() + ": " + t);
+            return AcceptResult.FAILED;
+        }
+        settings.invalidate(party.getId());
+        announceJoin(party, player);
+        return AcceptResult.JOINED;
+    }
+
+    /**
+     * Tell the party someone arrived. Suppressing Parties' messages above also
+     * suppressed this, which left the inviter with no sign their invite landed
+     * unless they happened to have the sidebar on.
+     */
+    private void announceJoin(Party party, Player joined) {
+        String text = "\u00a7a" + joined.getName() + " \u00a77joined the party.";
+        List<UUID> members = new ArrayList<>(party.getMembers());
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            for (UUID id : members) {
+                if (id.equals(joined.getUniqueId())) continue;
+                Player member = Bukkit.getPlayer(id);
+                if (member != null && member.isOnline()) member.sendMessage(text);
+            }
+        });
+    }
+
+    @Override
+    public void denyInvite(Player player, Consumer<Boolean> callback) {
+        denyInvite(player, null, callback);
+    }
+
+    @Override
+    public void denyInvite(Player player, String inviterName, Consumer<Boolean> callback) {
+        offThread(() -> callback.accept(denyInviteNow(player, inviterName)));
+    }
+
+    private boolean denyInviteNow(Player player, String inviterName) {
+        PartyInvite invite = pendingInvite(player == null ? null : player.getUniqueId(), inviterName);
+        if (invite == null) return false;
+        try {
+            invite.deny(false);
+        } catch (Throwable t) {
+            plugin.getLogger().warning("party deny failed for " + player.getName() + ": " + t);
+            return false;
+        }
+        return true;
+    }
+
+    @Override
+    public void kick(Player actor, UUID targetId, Consumer<Boolean> callback) {
+        offThread(() -> callback.accept(kickNow(actor, targetId)));
+    }
+
+    private boolean kickNow(Player actor, UUID targetId) {
         Party party = api.getPartyOfPlayer(actor.getUniqueId());
         if (party == null) return false;
         if (!isLeader(actor.getUniqueId()) && !canChangeLootMode(actor.getUniqueId())) {
@@ -183,7 +410,11 @@ public final class PartiesPartyService implements PartyService {
     }
 
     @Override
-    public boolean promote(Player actor, UUID targetId) {
+    public void promote(Player actor, UUID targetId, Consumer<Boolean> callback) {
+        offThread(() -> callback.accept(promoteNow(actor, targetId)));
+    }
+
+    private boolean promoteNow(Player actor, UUID targetId) {
         if (!isLeader(actor.getUniqueId())) return false;
         Party party = api.getPartyOfPlayer(actor.getUniqueId());
         PartyPlayer target = api.getPartyPlayer(targetId);
@@ -193,7 +424,11 @@ public final class PartiesPartyService implements PartyService {
     }
 
     @Override
-    public boolean leave(Player player) {
+    public void leave(Player player, Consumer<Boolean> callback) {
+        offThread(() -> callback.accept(leaveNow(player)));
+    }
+
+    private boolean leaveNow(Player player) {
         PartyPlayer pp = api.getPartyPlayer(player.getUniqueId());
         if (pp == null) return false;
         Status status = api.removePlayerFromParty(pp);

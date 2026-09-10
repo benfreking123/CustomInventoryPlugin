@@ -1,5 +1,6 @@
 package com.example.custominventoryplugin.tooltip;
 
+import com.example.custominventoryplugin.combat.CritCalculator;
 import io.papermc.paper.datacomponent.DataComponentTypes;
 import io.papermc.paper.datacomponent.item.CustomModelData;
 import net.kyori.adventure.key.Key;
@@ -178,6 +179,7 @@ public final class TooltipStyleService {
     private final GemTooltip gemTooltip;
     private final CatalystTooltip catalystTooltip;
     private final LootboxTooltip lootboxTooltip;
+    private final FoodTooltip foodTooltip;
     private final NamespacedKey pageKey;
     private final NamespacedKey page1Key;
     private final NamespacedKey page2Key;     // source / notes page
@@ -200,12 +202,14 @@ public final class TooltipStyleService {
     private Method tierGetId;
     private Method itemStatsGetLevel;
 
-    public TooltipStyleService(JavaPlugin plugin, TooltipConfig config) {
+    public TooltipStyleService(JavaPlugin plugin, TooltipConfig config,
+                              com.example.custominventoryplugin.food.FoodRegenConfig foodConfig) {
         this.plugin = plugin;
         this.config = config;
         this.gemTooltip = new GemTooltip(plugin, config);
         this.catalystTooltip = new CatalystTooltip(plugin, config);
         this.lootboxTooltip = new LootboxTooltip(plugin, config);
+        this.foodTooltip = new FoodTooltip(plugin, foodConfig);
         this.pageKey = new NamespacedKey(plugin, "tt_page");
         this.page1Key = new NamespacedKey(plugin, "tt_page1");
         this.page2Key = new NamespacedKey(plugin, "tt_page2");
@@ -279,6 +283,16 @@ public final class TooltipStyleService {
     /** Like {@link #stamp(ItemStack)}; a viewer enables live ✓/✗ state and (have) totals. */
     public void stamp(ItemStack stack, Player viewer) {
         if (!config.isEnabled() || stack == null || stack.getType().isAir()) return;
+
+        // Food is matched on Material, so it has to be handled ahead of the
+        // gate below: a loaf of bread has neither a Divinity item id nor a
+        // style path and would fall straight through it. No frame, no pages,
+        // no name font -- just the regen line, since that is the only thing
+        // about vanilla food that is no longer self-evident.
+        if (foodTooltip.isTracked(stack.getType())) {
+            foodTooltip.reflow(stack);
+            return;
+        }
 
         String itemId = resolveItemId(stack);
         String stylePath = resolveStylePath(stack, itemId);
@@ -864,16 +878,9 @@ public final class TooltipStyleService {
         return weaponDamageLine("&f" + plain.substring(0, sp) + " &4" + plain.substring(sp + 1));
     }
 
-    /**
-     * Whether basic attacks with this material can crit. Deliberately mirrors
-     * {@code BasicAttackCritListener.categoryOf} — if the two ever disagree the
-     * tooltip is lying, so change them together. Wands are absent on purpose:
-     * they cast skills, which roll their own crit.
-     */
+    /** Whether basic attacks with this material can crit. */
     private static boolean isCritWeapon(Material material) {
-        if (material == null) return false;
-        return material == Material.BOW || material == Material.CROSSBOW
-                || material.name().endsWith("_SWORD");
+        return CritCalculator.isCritWeapon(material);
     }
 
     /**

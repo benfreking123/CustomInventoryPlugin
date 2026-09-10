@@ -62,7 +62,7 @@ public class DeathLootListener implements Listener {
 
         List<ItemStack> drops = event.getDrops();
         if (drops.isEmpty()) {
-            grantXp(event, killer);
+            suppressVanillaXp(event);
             return;
         }
 
@@ -90,7 +90,7 @@ public class DeathLootListener implements Listener {
             DelayedGroundPickup.schedule(plugin, pipeline, recipient, loc, stack, delay, effects);
         }
 
-        grantXp(event, killer);
+        suppressVanillaXp(event);
     }
 
     private List<Player> resolveEligible(Player killer, org.bukkit.Location loc) {
@@ -128,11 +128,20 @@ public class DeathLootListener implements Listener {
         return reason != null && config.getBlacklistSpawnReasons().contains(reason.name());
     }
 
-    private void grantXp(EntityDeathEvent event, Player killer) {
-        int xp = event.getDroppedExp();
-        if (xp > 0) {
-            killer.giveExp(xp);
-            event.setDroppedExp(0);
-        }
+    /**
+     * Swallow the mob's vanilla experience.
+     *
+     * <p>Fabled owns the vanilla XP bar ({@code GUI.level-bar: level}) and rewrites
+     * it from class level and class progress every five ticks. Granting vanilla XP
+     * here used to move that same bar, so the fill jumped to a fraction of the
+     * class-level requirement and then snapped back on Fabled's next tick — the
+     * bar visibly emptying and refilling while the level number sat still.
+     *
+     * <p>Zeroing the drop stays. Class XP comes from each mob's {@code skillapi-exp}
+     * MythicMobs drop, and Fabled's own kill listener runs at {@code MONITOR} and
+     * would award class XP a second time from a non-zero value.
+     */
+    private void suppressVanillaXp(EntityDeathEvent event) {
+        event.setDroppedExp(0);
     }
 }

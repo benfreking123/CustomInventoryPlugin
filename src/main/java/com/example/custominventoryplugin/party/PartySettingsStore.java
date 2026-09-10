@@ -8,6 +8,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -20,6 +22,8 @@ public final class PartySettingsStore {
     private final CustomInventoryPlugin plugin;
     private final Database database;
     private final Map<UUID, LootMode> cache = new ConcurrentHashMap<>();
+    /** Parties with a warm-up in flight, so a 2s timer cannot stack loads. */
+    private final Set<UUID> warming = ConcurrentHashMap.newKeySet();
 
     public PartySettingsStore(CustomInventoryPlugin plugin, Database database) {
         this.plugin = plugin;
@@ -33,6 +37,28 @@ public final class PartySettingsStore {
         LootMode loaded = load(partyId);
         cache.put(partyId, loaded);
         return loaded;
+    }
+
+    /**
+     * Cached value only, warming the cache off-thread on a miss. For callers on
+     * a repeating main-thread task: {@link #getLootMode} would run a query on
+     * the tick loop, and {@link #invalidate} is called on every party join, so
+     * a miss is routine rather than once per party.
+     */
+    public Optional<LootMode> peekLootMode(UUID partyId) {
+        if (partyId == null) return Optional.empty();
+        LootMode cached = cache.get(partyId);
+        if (cached != null) return Optional.of(cached);
+        if (warming.add(partyId)) {
+            plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
+                try {
+                    cache.put(partyId, load(partyId));
+                } finally {
+                    warming.remove(partyId);
+                }
+            });
+        }
+        return Optional.empty();
     }
 
     public void setLootMode(UUID partyId, LootMode mode) {

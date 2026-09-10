@@ -32,6 +32,8 @@ public class GroupDropChooser implements InventoryHolder {
     private boolean tokenConsumed = false;
     /** Set true while we transition to a preview window so close handling is a no-op. */
     private boolean openingPreview = false;
+    /** Set true when the plugin closes the window itself, so it offers no way back in. */
+    private boolean suppressReopen = false;
 
     public GroupDropChooser(Player player, GroupDrop group, boolean tokenTriggered,
                             int picksRemaining, Set<Integer> chosen) {
@@ -87,6 +89,8 @@ public class GroupDropChooser implements InventoryHolder {
     public void markTokenConsumed()        { this.tokenConsumed = true; }
     public boolean isOpeningPreview()      { return openingPreview; }
     public void setOpeningPreview(boolean b) { this.openingPreview = b; }
+    public boolean isSuppressReopen()      { return suppressReopen; }
+    public void setSuppressReopen(boolean b) { this.suppressReopen = b; }
 
     @Override @NotNull
     public Inventory getInventory() { return inventory; }

@@ -91,6 +91,10 @@ public class CompendiumInventory implements InventoryHolder {
         scalars.put("recipes_total", Integer.toString(cfg.recipes().size()));
         scalars.put("crystals", Integer.toString(st.crystals));
         scalars.put("dungeon_runs", Integer.toString(st.dungeonRuns));
+        scalars.put("crates_opened", Integer.toString(st.cratesOpened));
+        scalars.put("crate_mimics", Integer.toString(st.crateMimics));
+        scalars.put("breach_completed", Integer.toString(st.breachCompleted));
+        scalars.put("breach_highest", st.breachHighest > 0 ? "Tier " + st.breachHighest : "none");
         scalars.put("bestiary_found", Integer.toString(st.bestiaryFound));
         scalars.put("bestiary_total", Integer.toString(st.bestiaryTotal));
         scalars.put("floor_count", Integer.toString(st.floorCount));
@@ -112,6 +116,7 @@ public class CompendiumInventory implements InventoryHolder {
         blocks.put("haven_status", havenStatus());
         blocks.put("camps_summary", campsSummary(st.counters));
         blocks.put("recipes_summary", recipesSummary());
+        blocks.put("crates_summary", cratesSummary(st.counters, st.cratesOpened));
 
         // ── render tiles from config ────────────────────────────────────────
         for (MenuTile tile : cfg.menuTiles()) {
@@ -271,6 +276,46 @@ public class CompendiumInventory implements InventoryHolder {
             lore.add(found
                     ? "&a\u2714 &f" + c.label + where
                     : "&8\u2718 &7???" + where);
+        }
+        return lore;
+    }
+
+    /**
+     * Crate openings grouped by where the crate stood, one row per tier.
+     *
+     * <p>TowerCrates writes {@code crate.<source>.<tier>} per opening and
+     * appends {@code .mimic} when the crate bit instead, so a tier's total is
+     * the two rows added and the mimic count is a share of it rather than an
+     * extra. Anything counted whose source or tier isn't configured here is
+     * rolled into a trailing line, so the rows always reconcile with the tile's
+     * headline total instead of quietly falling short of it.
+     */
+    private List<String> cratesSummary(Map<String, Integer> counters, int allOpened) {
+        List<String> lore = new ArrayList<>();
+        List<CompendiumConfig.CrateLabel> sources = cfg.crateSources();
+        List<CompendiumConfig.CrateLabel> tiers = cfg.crateTiers();
+        if (sources.isEmpty() || tiers.isEmpty()) {
+            lore.add("&8Crate tracking not configured.");
+            return lore;
+        }
+        int listed = 0;
+        for (CompendiumConfig.CrateLabel source : sources) {
+            lore.add("&7" + source.label);
+            for (CompendiumConfig.CrateLabel tier : tiers) {
+                String key = cfg.cratesPrefix() + source.id + "." + tier.id;
+                int mimics = counters.getOrDefault(key + ".mimic", 0);
+                int opened = counters.getOrDefault(key, 0) + mimics;
+                listed += opened;
+                if (opened <= 0) {
+                    lore.add("&8\u2718 " + tier.label + ": 0");
+                    continue;
+                }
+                lore.add("&a\u2714 &f" + tier.label + "&7: &f" + opened
+                        + (mimics > 0 ? " &c(" + mimics + " mimic" + (mimics == 1 ? "" : "s") + ")" : ""));
+            }
+        }
+        if (allOpened > listed) {
+            lore.add("&8Other: &7" + (allOpened - listed));
         }
         return lore;
     }

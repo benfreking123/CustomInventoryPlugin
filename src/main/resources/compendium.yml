@@ -73,11 +73,12 @@ progress:
     misc: 10
 
 # Generic counter key-prefixes (cip_counters) summed for the journey stats.
-# These are set by Skript/MythicDungeons via /cipcount <player> <key>.
+# These are set by Skript/MythicDungeons/TowerCrates via /cipcount <player> <key>.
 counters:
   crystals-prefix: "crystal."
   dungeon-prefix: "dungeon."
   checkpoint-prefix: "checkpoint."
+  crates-prefix: "crate."
 
 # LuckPerms nodes that represent story progress. Only an EXPLICIT grant
 # counts (the op fallback is deliberately ignored, so opped staff don't
@@ -103,6 +104,29 @@ camps:
     label: "Hearth Ranch"
     floor: 4
 
+# ------------------------------------------------------------
+#  Tower crate openings, for {crates_summary}. TowerCrates counts
+#  each opening as "<crates-prefix><source>.<tier>", appending
+#  ".mimic" when the crate woke a mimic instead of opening — so a
+#  tier's total is those two rows added, and the mimic count is a
+#  share of it rather than an extra.
+#
+#  source is the directory the crate's loot table lives in, with
+#  every floor sharing one namespace: tables/floor3/common -> floor,
+#  tables/vote/rare -> vote.
+#
+#  Display only. A source or tier missing here is still counted; it
+#  just lands in the tile's "Other" line instead of a row of its own.
+crates:
+  sources:
+    floor: "Floors"
+    vote: "Vote Vault"
+  tiers:
+    common: "Common"
+    uncommon: "Uncommon"
+    rare: "Rare"
+    legendary: "Legendary"
+
 # ============================================================
 #  menu — the /compendium hub layout (custom-slots style)
 #  --------------------------------------------------------
@@ -120,6 +144,7 @@ camps:
 #  Scalar placeholders:
 #    {player} {score} {playtime} {deaths} {first_joined}
 #    {quests_done} {quests_total} {camps} {camps_total} {crystals} {dungeon_runs}
+#    {crates_opened} {crate_mimics}
 #    {bestiary_found} {bestiary_total} {floor_count} {highest} {climb_line}
 #  Block placeholders (own line):
 #    {bars}           5 progress-breakdown bars
@@ -127,6 +152,7 @@ camps:
 #    {floors_summary} climb summary (cleared/highest/next/zone bar)
 #    {haven_status}   personal-space status lines
 #    {camps_summary}  camp discoveries (name or ??? per camp)
+#    {crates_summary} crate openings per source and tier
 # ============================================================
 menu:
   title: "&f\uE201\uA426"
@@ -171,6 +197,20 @@ menu:
         - "&6Found: &f{camps}&7/&f{camps_total}"
         - ""
         - "{camps_summary}"
+    crates:
+      enabled: true
+      slot: 12
+      icon: TRAPPED_CHEST
+      name: "&6&lTower Crates"
+      action: none
+      lore:
+        - "&7Chests prised open across the Tower —"
+        - "&7and the ones that prised back."
+        - ""
+        - "&6Opened: &f{crates_opened}"
+        - "&cMimics woken: &f{crate_mimics}"
+        - ""
+        - "{crates_summary}"
     quests:
       enabled: true
       slot: 1

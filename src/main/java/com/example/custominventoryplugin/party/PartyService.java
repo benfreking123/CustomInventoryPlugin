@@ -6,6 +6,7 @@ import org.bukkit.entity.Player;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Façade over the network party roster. Callers never touch AlessioDP Parties
@@ -34,18 +35,67 @@ public interface PartyService {
 
     LootMode getLootMode(UUID partyId);
 
+    /** Cached loot mode only — never touches the database. For repeating tasks. */
+    Optional<LootMode> peekLootMode(UUID partyId);
+
     void setLootMode(UUID partyId, LootMode mode);
 
     /** True if the player may change loot mode (leader, or rank with party.lootmode). */
     boolean canChangeLootMode(UUID playerId);
 
-    boolean invite(Player from, Player target);
+    /*
+     * The four mutators below are CALLBACK-BASED ON PURPOSE, and the callback
+     * runs OFF the main thread.
+     *
+     * Every Parties API call that mutates the roster fires one of its
+     * {@code ...Post...Event}s, and all of those are declared async-only, so
+     * Bukkit throws IllegalStateException("may only be triggered
+     * asynchronously") if they are called from the server thread. Only the
+     * {@code Pre} events are sync. Returning a value would invite callers to
+     * use these from a command or inventory-click handler, which is exactly
+     * the mistake that produced "internal error" on every invite — and it
+     * leaked a real party each time, because Parties creates the party before
+     * it fires the event that throws.
+     *
+     * Sending messages from the callback is fine. Anything touching an
+     * inventory is not — hop back with runTask() first.
+     */
 
-    boolean kick(Player actor, UUID targetId);
+    /**
+     * Invite {@code target}, creating a party for {@code from} if needed. The
+     * roster plugin sends its own (clickable) invite messages, so callers
+     * should only report failures.
+     */
+    void invite(Player from, Player target, Consumer<InviteResult> callback);
 
-    boolean promote(Player actor, UUID targetId);
+    /**
+     * Name of whoever has a party invite outstanding for this player, if any.
+     *
+     * <p>Only sees invites made on THIS backend. Parties does forward an invite
+     * to the proxy, but each side keeps its own copy in memory with its own
+     * expiry, and the proxy hides {@code /party accept} when its copy is gone —
+     * which is why CIP owns the whole cycle rather than handing players off.
+     */
+    Optional<String> pendingInviteFrom(UUID playerId);
 
-    boolean leave(Player player);
+    /** Every outstanding inviter, so a player with more than one can pick. */
+    List<String> pendingInviters(UUID playerId);
+
+    /** Accepts the invite {@link #pendingInviteFrom} named. */
+    void acceptInvite(Player player, Consumer<AcceptResult> callback);
+
+    /** Accepts a named inviter's invite; null falls back to the first. */
+    void acceptInvite(Player player, String inviterName, Consumer<AcceptResult> callback);
+
+    void denyInvite(Player player, Consumer<Boolean> callback);
+
+    void denyInvite(Player player, String inviterName, Consumer<Boolean> callback);
+
+    void kick(Player actor, UUID targetId, Consumer<Boolean> callback);
+
+    void promote(Player actor, UUID targetId, Consumer<Boolean> callback);
+
+    void leave(Player player, Consumer<Boolean> callback);
 
     /** Start a short ready-check; returns false if no party / already running. */
     boolean startReadyCheck(Player leader);

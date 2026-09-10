@@ -26,6 +26,8 @@ import java.util.List;
  *   crystals-prefix: "crystal."
  *   dungeon-prefix: "dungeon."
  *   checkpoint-prefix: "checkpoint."
+ *   crates-prefix: "crate."
+ *   breach-prefix: "breach."
  * permissions:
  *   floor-done: "tower.floor{n}.done"   # {n} → floor number
  *   haven-unlocked: "tower.haven.unlocked"
@@ -47,6 +49,8 @@ public class CompendiumConfig {
     private String crystalsPrefix = "crystal.";
     private String dungeonPrefix = "dungeon.";
     private String checkpointPrefix = "checkpoint.";
+    private String cratesPrefix = "crate.";
+    private String breachPrefix = "breach.";
 
     private String floorDoneNode = "tower.floor{n}.done";
     private String havenUnlockedNode = "tower.haven.unlocked";
@@ -92,6 +96,28 @@ public class CompendiumConfig {
     }
 
     private final List<Recipe> recipes = new ArrayList<>();
+
+    /**
+     * One crate source or tier, in the order the Crates tile lists it.
+     * TowerCrates counts an opening as {@code crate.<source>.<tier>} (plus
+     * {@code .mimic} when the crate woke a mimic), so these two lists are what
+     * turns those keys into rows of lore.
+     *
+     * <p>Display only: a source or tier missing here is still counted, it just
+     * lands in the tile's "Other" line instead of a row of its own.
+     */
+    public static final class CrateLabel {
+        public final String id;
+        public final String label;
+
+        CrateLabel(String id, String label) {
+            this.id = id;
+            this.label = label;
+        }
+    }
+
+    private final List<CrateLabel> crateSources = new ArrayList<>();
+    private final List<CrateLabel> crateTiers = new ArrayList<>();
 
     // Hub GUI layout (custom-slots style). Fully data-driven so tiles can be
     // moved, re-skinned, relabelled or disabled without a rebuild.
@@ -182,6 +208,8 @@ public class CompendiumConfig {
             crystalsPrefix = c.getString("crystals-prefix", crystalsPrefix);
             dungeonPrefix = c.getString("dungeon-prefix", dungeonPrefix);
             checkpointPrefix = c.getString("checkpoint-prefix", checkpointPrefix);
+            cratesPrefix = c.getString("crates-prefix", cratesPrefix);
+            breachPrefix = c.getString("breach-prefix", breachPrefix);
         }
 
         ConfigurationSection perms = cfg.getConfigurationSection("permissions");
@@ -214,7 +242,26 @@ public class CompendiumConfig {
             }
         }
 
+        crateSources.clear();
+        crateTiers.clear();
+        ConfigurationSection crates = cfg.getConfigurationSection("crates");
+        if (crates != null) {
+            readLabels(crates.getConfigurationSection("sources"), crateSources);
+            readLabels(crates.getConfigurationSection("tiers"), crateTiers);
+        }
+
         loadMenu(cfg.getConfigurationSection("menu"));
+    }
+
+    /** {@code id: "Label"} rows, also accepting the {@code id: {label: …}} form. */
+    private static void readLabels(ConfigurationSection s, List<CrateLabel> into) {
+        if (s == null) return;
+        for (String id : s.getKeys(false)) {
+            ConfigurationSection nested = s.getConfigurationSection(id);
+            into.add(new CrateLabel(id, nested != null
+                    ? nested.getString("label", id)
+                    : s.getString(id, id)));
+        }
     }
 
     private void loadMenu(ConfigurationSection menu) {
@@ -265,6 +312,7 @@ public class CompendiumConfig {
                 "&6Camps found: &f{camps}",
                 "&5Crystals charged: &f{crystals}",
                 "&cDungeon runs: &f{dungeon_runs}",
+                "&dBreaches cleared: &f{breach_completed} &7(best: &f{breach_highest}&7)",
                 "",
                 "&7Progress breakdown",
                 "{bars}")));
@@ -292,6 +340,11 @@ public class CompendiumConfig {
                 "&eClick to open.")));
         menuTiles.add(new MenuTile("collections", true, 6, "CHEST", "&e&lCollections &8(soon)", "none", List.of(
                 "&7Tracking arrives in a future update.")));
+        menuTiles.add(new MenuTile("crates", true, 12, "TRAPPED_CHEST", "&6&lTower Crates", "none", List.of(
+                "&7Crates opened: &f{crates_opened}",
+                "&cMimics woken: &f{crate_mimics}",
+                "",
+                "{crates_summary}")));
         menuTiles.add(new MenuTile("close", true, 8, "BARRIER", "&c&lClose", "close", List.of(
                 "&7Close the compendium.")));
         menuTiles.add(new MenuTile("head", true, 13, "player_head", "&d&l{player}", "none", List.of(
@@ -310,6 +363,8 @@ public class CompendiumConfig {
     public String crystalsPrefix() { return crystalsPrefix; }
     public String dungeonPrefix() { return dungeonPrefix; }
     public String checkpointPrefix() { return checkpointPrefix; }
+    public String cratesPrefix() { return cratesPrefix; }
+    public String breachPrefix() { return breachPrefix; }
 
     /** LuckPerms node for a floor's completion tag ({@code {n}} → floor number). */
     public String floorDoneNode(int floor) { return floorDoneNode.replace("{n}", Integer.toString(floor)); }
@@ -318,6 +373,8 @@ public class CompendiumConfig {
 
     public List<Camp> camps() { return Collections.unmodifiableList(camps); }
     public List<Recipe> recipes() { return Collections.unmodifiableList(recipes); }
+    public List<CrateLabel> crateSources() { return Collections.unmodifiableList(crateSources); }
+    public List<CrateLabel> crateTiers() { return Collections.unmodifiableList(crateTiers); }
 
     public String menuTitle() { return menuTitle; }
     public int menuRows() { return menuRows; }

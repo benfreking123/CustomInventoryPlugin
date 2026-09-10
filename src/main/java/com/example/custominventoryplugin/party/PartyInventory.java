@@ -35,13 +35,22 @@ public final class PartyInventory implements InventoryHolder {
     public static final String ACT_INVITE = "invite";
     public static final String ACT_KICK = "kick:";
     public static final String ACT_PROMOTE = "promote:";
+    public static final String ACT_BOARD = "board";
+    public static final String ACT_ACCEPT = "accept";
+    public static final String ACT_DENY = "deny";
 
-    private static final int[] MEMBER_SLOTS = {10, 11, 12, 13};
-    private static final int SLOT_LOOT = 15;
-    private static final int SLOT_READY = 16;
-    private static final int SLOT_INVITE = 19;
-    private static final int SLOT_LEAVE = 22;
-    private static final int SLOT_CLOSE = 25;
+    /** Four heads spread symmetrically about the centre of row 1. Parties cap
+     *  at 4 to match MaxPartySize in the MythicDungeons map configs. */
+    private static final int[] MEMBER_SLOTS = {10, 12, 14, 16};
+    private static final int SLOT_EMPTY_NOTICE = 22;
+    private static final int SLOT_LOOT = 29;
+    private static final int SLOT_READY = 31;
+    private static final int SLOT_INVITE = 33;
+    private static final int SLOT_BOARD = 27;
+    private static final int SLOT_ACCEPT = 12;
+    private static final int SLOT_DENY = 14;
+    private static final int SLOT_LEAVE = 48;
+    private static final int SLOT_CLOSE = 50;
 
     private final CustomInventoryPlugin plugin;
     private final PartyService parties;
@@ -54,7 +63,9 @@ public final class PartyInventory implements InventoryHolder {
         this.parties = parties;
         this.viewer = viewer;
         this.actionKey = new NamespacedKey(plugin, ACTION_KEY);
-        this.inventory = Bukkit.createInventory(this, 27, Text.nexoBackground('\uA41C', 16));
+        PartyDisplayConfig display = plugin.getPartyDisplayConfig();
+        this.inventory = Bukkit.createInventory(this, 54,
+                Text.nexoBackground(display.backgroundGlyph(), display.backgroundShift()));
         render();
     }
 
@@ -68,14 +79,26 @@ public final class PartyInventory implements InventoryHolder {
         Optional<UUID> partyId = parties.getPartyId(viewer.getUniqueId());
 
         if (partyId.isEmpty()) {
-            inventory.setItem(13, labeled(Material.OAK_SIGN, "No Party",
-                    List.of("You are not in a party.",
-                            "Invite someone nearby with",
-                            "/ci party invite <player>",
-                            "or click Invite below."),
+            Optional<String> inviter = parties.pendingInviteFrom(viewer.getUniqueId());
+            if (inviter.isPresent()) {
+                inventory.setItem(SLOT_ACCEPT, labeled(Material.LIME_DYE, "Accept Invite",
+                        List.of("From: " + inviter.get(), "Click to join the party"), ACT_ACCEPT));
+                inventory.setItem(SLOT_DENY, labeled(Material.RED_DYE, "Decline Invite",
+                        List.of("From: " + inviter.get()), ACT_DENY));
+            }
+            inventory.setItem(SLOT_EMPTY_NOTICE, labeled(Material.OAK_SIGN, "No Party",
+                    inviter.isPresent()
+                            ? List.of("You are not in a party.",
+                                    inviter.get() + " has invited you —",
+                                    "accept with the green dye above.")
+                            : List.of("You are not in a party.",
+                                    "Invite someone nearby with",
+                                    "/party invite <player>",
+                                    "or click Invite below."),
                     ACT_INVITE));
             inventory.setItem(SLOT_INVITE, labeled(Material.WRITABLE_BOOK, "Invite",
-                    List.of("Type: /ci party invite <player>"), ACT_INVITE));
+                    List.of("Type: /party invite <player>"), ACT_INVITE));
+            inventory.setItem(SLOT_BOARD, boardButton());
             inventory.setItem(SLOT_CLOSE, labeled(Material.BARRIER, "Close", List.of(), ACT_CLOSE));
             return;
         }
@@ -125,10 +148,23 @@ public final class PartyInventory implements InventoryHolder {
         inventory.setItem(SLOT_READY, labeled(Material.BELL, "Ready Check",
                 List.of("Ping the party — 45s to confirm"), ACT_READY));
         inventory.setItem(SLOT_INVITE, labeled(Material.WRITABLE_BOOK, "Invite",
-                List.of("Type: /ci party invite <player>"), ACT_INVITE));
+                List.of("Type: /party invite <player>"), ACT_INVITE));
         inventory.setItem(SLOT_LEAVE, labeled(Material.IRON_DOOR, "Leave Party",
                 List.of("Leave your current party"), ACT_LEAVE));
+        inventory.setItem(SLOT_BOARD, boardButton());
         inventory.setItem(SLOT_CLOSE, labeled(Material.BARRIER, "Close", List.of(), ACT_CLOSE));
+    }
+
+    /** Sidebar toggle. Personal preference, so it shows with or without a party. */
+    private ItemStack boardButton() {
+        PartyScoreboardService board = plugin.getPartyScoreboardService();
+        boolean on = board != null && board.isEnabled(viewer);
+        return labeled(on ? Material.LIME_BANNER : Material.GRAY_BANNER,
+                "Party Scoreboard",
+                List.of("Sidebar with leader, roster and loot mode",
+                        on ? "Currently: shown" : "Currently: hidden",
+                        on ? "Click to hide" : "Click to show"),
+                ACT_BOARD);
     }
 
     public String actionOf(ItemStack stack) {

@@ -1,7 +1,9 @@
 package com.example.custominventoryplugin.placeholders;
 
 import com.example.custominventoryplugin.CustomInventoryPlugin;
+import com.example.custominventoryplugin.combat.CritCalculator;
 import com.example.custominventoryplugin.compendium.CompendiumStats;
+import com.example.custominventoryplugin.config.ConfigManager;
 import com.example.custominventoryplugin.compendium.QuestProgress;
 import com.example.custominventoryplugin.config.BackpackConfig;
 import com.example.custominventoryplugin.config.BackpackConfig.BackpackDef;
@@ -10,7 +12,10 @@ import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
+import studio.magemonkey.fabled.Fabled;
+import studio.magemonkey.fabled.api.player.PlayerData;
 
+import java.text.DecimalFormat;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -31,11 +36,21 @@ import java.util.concurrent.ConcurrentHashMap;
  *   %customip_score%                     — weighted account progress 0-100
  *   %customip_bestiary_found% / _total / _pct
  *   %customip_camps% %customip_crystals% %customip_dungeon_runs%
+ *   %customip_breach_completed% %customip_breach_highest%
+ *   %customip_crates_opened% %customip_crate_mimics%
  *   %customip_quests_done% / _total / _pct / _bar
  *   %customip_quests_floor1_done% / _total / _pct / _bar   (any floor key)
  *
  * Stats panel:
  *   %customip_stats_tab%                 — offense | defense | utility | off
+ *   %customip_crit_base_<cat>%           — flat crit % this player adds
+ *   %customip_crit_inc_<cat>%            — increased crit chance %
+ *   %customip_crit_mult_<cat>%           — crit damage multiplier
+ *     for <cat> of attack | projectile | spell. These are the layers, true for
+ *     every skill and basic attack in that category.
+ *   %customip_crit_chance_attack% / _projectile%
+ *                                        — whole basic-attack crit %, which
+ *     only exists where there is a configured baseline to add the layer to
  *
  * Falls back to "0" / "-" for unknown ids so HUDs don't break.
  */
@@ -44,6 +59,12 @@ public class BackpackPlaceholders extends PlaceholderExpansion {
     private final CustomInventoryPlugin plugin;
     private final BackpackConfig config;
     private final BackpackData data;
+
+    /** Locale-fixed so the HUD never renders a comma decimal separator. */
+    private static final DecimalFormat ONE_DP =
+            new DecimalFormat("0.#", java.text.DecimalFormatSymbols.getInstance(Locale.ROOT));
+    private static final DecimalFormat TWO_DP =
+            new DecimalFormat("0.##", java.text.DecimalFormatSymbols.getInstance(Locale.ROOT));
 
     /** Short-lived stats cache: HUDs poll every tick, MariaDB shouldn't. */
     private static final long STATS_TTL_MS = 5000L;
@@ -71,6 +92,11 @@ public class BackpackPlaceholders extends PlaceholderExpansion {
         // tick — keep it allocation-free and ahead of the heavier lookups.
         if (params.equalsIgnoreCase("stats_tab")) {
             return com.example.custominventoryplugin.inventory.StatsPanel.tab(player.getUniqueId());
+        }
+
+        if (params.regionMatches(true, 0, "crit_", 0, 5)) {
+            String crit = critValue(player, params.toLowerCase(Locale.ROOT));
+            if (crit != null) return crit;
         }
 
         String compendium = compendiumValue(player, params.toLowerCase(Locale.ROOT));
@@ -111,6 +137,63 @@ public class BackpackPlaceholders extends PlaceholderExpansion {
         };
     }
 
+    // ── crit placeholders ───────────────────────────────────────────────────
+
+    /**
+     * Effective crit for the stats panel, or null when {@code params} isn't a
+     * crit placeholder.
+     *
+     * <p>Deliberately routed through {@link CritCalculator}, the same class
+     * {@code BasicAttackCritListener} rolls against, so the panel reports the
+     * rate the game actually uses rather than a second copy of the formula
+     * that can quietly fall out of step.
+     *
+     * <p>Only melee and bow expose a <em>chance</em>: those have a known flat
+     * baseline from config. A spell's base chance is written into each skill
+     * individually, so there is no single honest number to print — spells get
+     * a multiplier only.
+     */
+    private String critValue(OfflinePlayer player, String params) {
+        String kind;
+        if (params.startsWith("crit_chance_")) kind = "chance";
+        else if (params.startsWith("crit_mult_")) kind = "mult";
+        else if (params.startsWith("crit_base_")) kind = "base";
+        else if (params.startsWith("crit_inc_")) kind = "inc";
+        else return null;
+
+        String category = params.substring(params.lastIndexOf('_') + 1);
+        boolean real = category.equals(CritCalculator.MELEE)
+                || category.equals(CritCalculator.RANGED)
+                || category.equals(CritCalculator.SPELL);
+        // Only melee and bow have a basic attack to state a whole chance for.
+        if (!real || (kind.equals("chance") && category.equals(CritCalculator.SPELL))) {
+            return null;
+        }
+
+        ConfigManager cfg = plugin.getConfigManager();
+        if (cfg == null || !cfg.isCritEnabled()) return "0";
+
+        PlayerData data;
+        try {
+            data = Fabled.getData(player);
+        } catch (Throwable ignored) {
+            return "0";
+        }
+
+        switch (kind) {
+            case "base":
+                return ONE_DP.format(CritCalculator.baseLayer(data, category));
+            case "inc":
+                return ONE_DP.format(CritCalculator.increasedLayer(data, category));
+            case "mult":
+                return TWO_DP.format(CritCalculator.multiplier(
+                        data, category, cfg.getCritBaseMultiplier()));
+            default:
+                return ONE_DP.format(CritCalculator.chance(
+                        data, category, cfg.getCritBaseChance()));
+        }
+    }
+
     // ── compendium placeholders ─────────────────────────────────────────────
 
     /** Value for a compendium placeholder, or null when {@code params} isn't one. */
@@ -118,6 +201,8 @@ public class BackpackPlaceholders extends PlaceholderExpansion {
         boolean known = params.equals("score")
                 || params.startsWith("bestiary_")
                 || params.equals("camps") || params.equals("crystals") || params.equals("dungeon_runs")
+                || params.equals("crates_opened") || params.equals("crate_mimics")
+                || params.equals("breach_completed") || params.equals("breach_highest")
                 || params.startsWith("quests_");
         if (!known) return null;
 
@@ -130,6 +215,10 @@ public class BackpackPlaceholders extends PlaceholderExpansion {
             case "camps":          return Integer.toString(st.checkpoints);
             case "crystals":       return Integer.toString(st.crystals);
             case "dungeon_runs":   return Integer.toString(st.dungeonRuns);
+            case "crates_opened":  return Integer.toString(st.cratesOpened);
+            case "crate_mimics":   return Integer.toString(st.crateMimics);
+            case "breach_completed": return Integer.toString(st.breachCompleted);
+            case "breach_highest": return Integer.toString(st.breachHighest);
             case "bestiary_found": return Integer.toString(st.bestiaryFound);
             case "bestiary_total": return Integer.toString(st.bestiaryTotal);
             case "bestiary_pct":   return pct(st.bestiaryFound, st.bestiaryTotal);
