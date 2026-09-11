@@ -1,6 +1,5 @@
 package com.example.custominventoryplugin.compendium;
 
-import org.bukkit.Material;
 
 /**
  * One collectable Divinity custom item (a gem or a unique). Armour sets are
@@ -13,10 +12,11 @@ public final class CollectionEntry {
     private final String id;
     private final String category;
     private final String display;
-    private final Material icon;
+    /** Icon spec: a Material name or {@code nexo:<id>}; see {@link Icons#build}. */
+    private final String icon;
     private final String rarity;
 
-    CollectionEntry(String id, String category, String display, Material icon, String rarity) {
+    CollectionEntry(String id, String category, String display, String icon, String rarity) {
         this.id = id;
         this.category = category;
         this.display = display;
@@ -27,6 +27,6 @@ public final class CollectionEntry {
     public String getId() { return id; }
     public String getCategory() { return category; }
     public String getDisplay() { return display; }
-    public Material getIcon() { return icon; }
+    public String getIcon() { return icon; }
     public String getRarity() { return rarity; }
 }

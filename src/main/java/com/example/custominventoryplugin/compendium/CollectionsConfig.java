@@ -45,9 +45,9 @@ public class CollectionsConfig {
     public static final class Category {
         public final String id;
         public final String display;
-        public final Material icon;
+        public final String icon;
 
-        Category(String id, String display, Material icon) {
+        Category(String id, String display, String icon) {
             this.id = id;
             this.display = display;
             this.icon = icon;
@@ -58,10 +58,10 @@ public class CollectionsConfig {
     public static final class SetEntry {
         public final String id;
         public final String display;
-        public final Material icon;
+        public final String icon;
         public final List<String> elements;
 
-        SetEntry(String id, String display, Material icon, List<String> elements) {
+        SetEntry(String id, String display, String icon, List<String> elements) {
             this.id = id;
             this.display = display;
             this.icon = icon;
@@ -123,7 +123,7 @@ public class CollectionsConfig {
                 if (s == null) continue;
                 categories.put(id, new Category(id,
                         s.getString("display", id),
-                        parseMaterial(s.getString("icon", "PAPER"), id)));
+                        parseIcon(s.getString("icon", "PAPER"), id)));
             }
         }
 
@@ -142,7 +142,7 @@ public class CollectionsConfig {
                 }
                 entries.put(key, new CollectionEntry(key, category,
                         s.getString("display", id),
-                        parseMaterial(s.getString("icon", "PAPER"), id),
+                        parseIcon(s.getString("icon", "PAPER"), id),
                         s.getString("rarity", "common")));
             }
         }
@@ -161,7 +161,7 @@ public class CollectionsConfig {
                 if (elements.isEmpty()) continue;
                 sets.put(key, new SetEntry(key,
                         s.getString("display", id),
-                        parseMaterial(s.getString("icon", "LEATHER_CHESTPLATE"), id),
+                        parseIcon(s.getString("icon", "LEATHER_CHESTPLATE"), id),
                         elements));
             }
         }
@@ -171,13 +171,20 @@ public class CollectionsConfig {
                 + totalTrackable() + " trackable total.");
     }
 
-    private Material parseMaterial(String name, String id) {
-        if (name == null || name.isBlank()) return Material.PAPER;
+    /**
+     * Validate an icon spec. {@code nexo:<id>} is passed through untouched
+     * (resolved at draw time by {@link Icons#build}); anything else must be a
+     * Material name.
+     */
+    private String parseIcon(String name, String id) {
+        if (name == null || name.isBlank()) return "PAPER";
+        String s = name.trim();
+        if (s.toLowerCase(Locale.ROOT).startsWith("nexo:")) return s;
         try {
-            return Material.valueOf(name.trim().toUpperCase(Locale.ROOT));
+            return Material.valueOf(s.toUpperCase(Locale.ROOT)).name();
         } catch (IllegalArgumentException e) {
             plugin.getLogger().warning("collections '" + id + "': bad icon '" + name + "', using PAPER.");
-            return Material.PAPER;
+            return "PAPER";
         }
     }
 

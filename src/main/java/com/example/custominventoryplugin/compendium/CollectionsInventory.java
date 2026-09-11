@@ -161,7 +161,7 @@ public class CollectionsInventory implements InventoryHolder {
                 lore.add("");
                 lore.add("&6\u2726 Set complete!");
             }
-            ItemStack icon = any ? new ItemStack(s.icon) : unknownIcon();
+            ItemStack icon = any ? Icons.build(s.icon, Material.PAPER) : unknownIcon();
             inventory.setItem(GRID[i], stamp(icon, ACT_ENTRY + s.id,
                     (any ? "" : "&8") + s.display, lore));
         }
@@ -173,7 +173,7 @@ public class CollectionsInventory implements InventoryHolder {
      * two states distinguishable at a glance.
      */
     private ItemStack entryIcon(boolean found, CollectionEntry e, List<String> lore) {
-        ItemStack icon = found ? new ItemStack(e.getIcon()) : unknownIcon();
+        ItemStack icon = found ? Icons.build(e.getIcon(), Material.PAPER) : unknownIcon();
         String name = (found ? "&f" : "&8") + stripColors(e.getDisplay());
         return stamp(icon, ACT_ENTRY + e.getId(), name, lore);
     }
