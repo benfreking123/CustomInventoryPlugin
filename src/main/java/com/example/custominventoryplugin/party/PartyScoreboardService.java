@@ -196,6 +196,13 @@ public final class PartyScoreboardService {
 
         UUID pid = partyId.get();
         List<UUID> members = parties.getMembers(pid);
+        if (members.size() < 2) {
+            // Parties auto-creates a party on invite and keeps it when the
+            // last other member leaves, so most players sit in a party of one
+            // for good. To them that is "not in a party" — no sidebar until
+            // somebody else is actually in it.
+            return lines;
+        }
         UUID leader = parties.getLeader(pid).orElse(null);
 
         lines.add("\u00a78Members \u00a7f" + members.size() + "\u00a77/\u00a7f4");

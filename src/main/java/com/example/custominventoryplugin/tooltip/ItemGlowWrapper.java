@@ -8,7 +8,9 @@ import team.unnamed.creative.item.ConditionItemModel;
 import team.unnamed.creative.item.EmptyItemModel;
 import team.unnamed.creative.item.Item;
 import team.unnamed.creative.item.ItemModel;
+import team.unnamed.creative.item.RangeDispatchItemModel;
 import team.unnamed.creative.item.SelectItemModel;
+import team.unnamed.creative.item.SpecialItemModel;
 import team.unnamed.creative.item.property.ItemBooleanProperty;
 import team.unnamed.creative.item.property.ItemStringProperty;
 import team.unnamed.creative.overlay.Overlay;
@@ -41,8 +43,16 @@ import java.util.List;
  * {@link TooltipStyleService} stamps the tier.
  *
  * The empty fallback on that select is load-bearing: an untiered item renders
- * exactly as before, which is what makes wrapping every definition safe and
- * means there is no per-item list to keep.
+ * exactly as before, which is what makes wrapping generated items safe and
+ * means there is no per-item allowlist to keep.
+ *
+ * Special models are the exception. {@code player_head}, banners, skulls,
+ * shields and the rest use a {@code minecraft:special} renderer whose GUI
+ * centering lives on the {@code base} model ({@code template_skull} translates
+ * {@code [0, 3, 0]}). 26.1/26.2 ignore that display once the special is nested
+ * in a {@code composite} — heads and banners sit down-left in the slot. 1.21.11
+ * does not. So we leave those definitions alone; they almost never carry a
+ * tooltip tier stamp anyway.
  *
  * Output is deterministic — sorted everywhere, no map iteration order — because
  * every backend must build a byte-identical pack or NexoProxy's hash dedup
@@ -80,6 +90,7 @@ final class ItemGlowWrapper {
         int added = 0;
         for (Item item : items) {
             if (pack.item(item.key()) != null) continue;
+            if (containsSpecial(item.model())) continue;
             pack.item(item);
             added++;
         }
@@ -106,6 +117,7 @@ final class ItemGlowWrapper {
         for (Item item : items) {
             ItemModel original = item.model();
             if (original == null || isWrapped(original)) continue;
+            if (containsSpecial(original)) continue;
             container.item(Item.item(item.key(), glowWrap(original, tiers),
                     item.handAnimationOnSwap(), item.oversizedInGui(), item.swapAnimationScale()));
             count++;
@@ -152,6 +164,38 @@ final class ItemGlowWrapper {
         if (composite.models().size() < 2) return false;
         return composite.models().get(0) instanceof ConditionItemModel condition
                 && condition.onTrue() instanceof EmptyItemModel;
+    }
+
+    /**
+     * True if this tree uses a {@code minecraft:special} renderer anywhere.
+     * Those keep their own GUI display and must not be nested in a composite
+     * on 26.1/26.2 (heads/banners drift down-left in the slot).
+     */
+    static boolean containsSpecial(ItemModel model) {
+        if (model == null) return false;
+        if (model instanceof SpecialItemModel) return true;
+        if (model instanceof CompositeItemModel composite) {
+            for (ItemModel child : composite.models()) {
+                if (containsSpecial(child)) return true;
+            }
+            return false;
+        }
+        if (model instanceof ConditionItemModel condition) {
+            return containsSpecial(condition.onTrue()) || containsSpecial(condition.onFalse());
+        }
+        if (model instanceof SelectItemModel select) {
+            for (SelectItemModel.Case c : select.cases()) {
+                if (containsSpecial(c.model())) return true;
+            }
+            return containsSpecial(select.fallback());
+        }
+        if (model instanceof RangeDispatchItemModel range) {
+            for (RangeDispatchItemModel.Entry e : range.entries()) {
+                if (containsSpecial(e.model())) return true;
+            }
+            return containsSpecial(range.fallback());
+        }
+        return false;
     }
 
 }
